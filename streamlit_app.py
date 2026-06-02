@@ -28,9 +28,7 @@ st.markdown("""
         color: #003882 !important;
     }
 
-    /* =========================================
-       ABAS DE NAVEGAÇÃO (TABS)
-       ========================================= */
+    /* ABAS DE NAVEGAÇÃO (TABS) */
     button[data-baseweb="tab"] {
         background-color: transparent !important;
     }
@@ -43,9 +41,7 @@ st.markdown("""
         border-bottom: 4px solid #003882 !important;
     }
 
-    /* =========================================
-       BOTÕES
-       ========================================= */
+    /* BOTÕES */
     .stButton>button, .stButton>button p {
         background-color: #003882 !important;
         color: #FFDF00 !important;
@@ -189,7 +185,6 @@ def calculate_score(row):
     return 0
 
 def acerto_gols_vencedor(row):
-
     pred_a = row['pred_a']
     pred_b = row['pred_b']
     real_a = row['real_a']
@@ -224,7 +219,7 @@ aba1, aba2, aba3, aba4, aba5 = st.tabs(
     ]
 )
 
-# --- ABA 1: FORMULÁRIO DE PALPITES (COM TRAVA DE TEMPO E ORDENAÇÃO) ---
+# --- ABA 1: FORMULÁRIO DE PALPITES ---
 with aba1:
     agora = pd.Timestamp.now(tz="America/Sao_Paulo")
     
@@ -243,7 +238,6 @@ with aba1:
             st.subheader("Fase de Grupos")
             novos_palpites = []
             
-            # ATUALIZAÇÃO AQUI: Organiza os grupos rigorosamente em ordem alfabética (A, B, C, D...)
             grupos_unicos = sorted(df_oficiais['grupo'].dropna().unique())
             
             for grupo in grupos_unicos:
@@ -264,9 +258,11 @@ with aba1:
                         col1, col2, col3, col4, col5 = st.columns([2.5, 1, 0.5, 1, 2.5])
 
                         with col1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
-                        with col2: gols_a = st.number_input("", key=f"a_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
+                        # Adicionado value=None para permitir que a caixa fique em branco inicialmente
+                        with col2: gols_a = st.number_input("", key=f"a_{row['game_id']}", step=1, min_value=0, value=None, label_visibility="collapsed")
                         with col3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
-                        with col4: gols_b = st.number_input("", key=f"b_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
+                        # Adicionado value=None para permitir que a caixa fique em branco inicialmente
+                        with col4: gols_b = st.number_input("", key=f"b_{row['game_id']}", step=1, min_value=0, value=None, label_visibility="collapsed")
                         with col5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
 
                         novos_palpites.append({
@@ -293,20 +289,20 @@ with aba1:
                     else:
                         id_part = f"P{len(df_palpites_verificacao['email'].unique()) + 1:02d}"
                         
-                        # --- AQUI ESTÁ A MÁGICA DO ZERO AUTOMÁTICO ---
+                        # --- MÁGICA DO ZERO AUTOMÁTICO ---
                         for p in novos_palpites:
                             p['participant_id'] = id_part
-                            # Se o valor for None ou vazio, vira 0
                             if p['pred_a'] is None: p['pred_a'] = 0
                             if p['pred_b'] is None: p['pred_b'] = 0
-                        # ---------------------------------------------
+                        # ---------------------------------
                         
                         df_novos = pd.DataFrame(novos_palpites)
                         df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
                         
                         conn.update(worksheet="Palpites", data=df_final)
                         st.cache_data.clear()
-                        st.success(f"Palpites de {nome_participante} registrados! Jogos vazios foram preenchidos como 0x0.")
+                        st.success(f"Palpites de {nome_participante} registrados! (Jogos deixados em branco foram registrados como 0x0)")
+
 # --- ABA 2: RANKING E DASHBOARD ---
 with aba2:
     st.header("Ranking Atualizado")
@@ -324,36 +320,19 @@ with aba2:
         df_analise['pred_a'] = pd.to_numeric(df_analise['pred_a'], errors='coerce')
         df_analise['pred_b'] = pd.to_numeric(df_analise['pred_b'], errors='coerce')
         
-        df_analise['pontos'] = df_analise.apply(
-    calculate_score,
-    axis=1
-)
+        df_analise['pontos'] = df_analise.apply(calculate_score, axis=1)
+        df_analise['acerto_vencedor'] = df_analise.apply(acerto_gols_vencedor, axis=1)
 
-df_analise['acerto_vencedor'] = df_analise.apply(
-    acerto_gols_vencedor,
-    axis=1
-)
-
-df_ranking = df_analise.groupby(
-    ['email', 'nome']
-).agg(
-    total_pontos=('pontos', 'sum'),
-    placares_exatos=('pontos', lambda x: (x == 10).sum()),
-    gols_vencedor=('acerto_vencedor', 'sum')
-).reset_index()
+        df_ranking = df_analise.groupby(['email', 'nome']).agg(
+            total_pontos=('pontos', 'sum'),
+            placares_exatos=('pontos', lambda x: (x == 10).sum()),
+            gols_vencedor=('acerto_vencedor', 'sum')
+        ).reset_index()
 
         df_ranking = df_ranking.sort_values(
-    by=[
-        'total_pontos',
-        'placares_exatos',
-        'gols_vencedor'
-    ],
-    ascending=[
-        False,
-        False,
-        False
-    ]
-).reset_index(drop=True)
+            by=['total_pontos', 'placares_exatos', 'gols_vencedor'],
+            ascending=[False, False, False]
+        ).reset_index(drop=True)
         df_ranking.index = df_ranking.index + 1
 
         col_m1, col_m2, col_m3 = st.columns(3)
@@ -374,36 +353,30 @@ df_ranking = df_analise.groupby(
             col_m3.metric("🥉 3º Colocado", "-", "-")
 
         st.dataframe(
-    df_ranking[
-        [
-            'nome',
-            'total_pontos',
-            'placares_exatos',
-            'gols_vencedor'
-        ]
-    ].rename(
-        columns={
-            'nome': 'Participante',
-            'total_pontos': 'Pontos',
-            'placares_exatos': 'Placares Exatos',
-            'gols_vencedor': 'Acertos Gols Vencedor'
-        }
-    ),
-    use_container_width=True
-)
-        top = df_ranking.iloc[0]
-
-empatados_primeiro = df_ranking[
-    (df_ranking['total_pontos'] == top['total_pontos']) &
-    (df_ranking['placares_exatos'] == top['placares_exatos']) &
-    (df_ranking['gols_vencedor'] == top['gols_vencedor'])
-]
-if len(empatados_primeiro) > 1:
-    st.warning(
-        f"🏆 Existem {len(empatados_primeiro)} participantes empatados "
-        "após todos os critérios de desempate. "
-        "Conforme o regulamento, o prêmio deverá ser dividido."
-    )
+            df_ranking[['nome', 'total_pontos', 'placares_exatos', 'gols_vencedor']].rename(
+                columns={
+                    'nome': 'Participante',
+                    'total_pontos': 'Pontos',
+                    'placares_exatos': 'Placares Exatos',
+                    'gols_vencedor': 'Acertos Gols Vencedor'
+                }
+            ),
+            use_container_width=True
+        )
+        
+        if len(df_ranking) > 0:
+            top = df_ranking.iloc[0]
+            empatados_primeiro = df_ranking[
+                (df_ranking['total_pontos'] == top['total_pontos']) &
+                (df_ranking['placares_exatos'] == top['placares_exatos']) &
+                (df_ranking['gols_vencedor'] == top['gols_vencedor'])
+            ]
+            if len(empatados_primeiro) > 1:
+                st.warning(
+                    f"🏆 Existem {len(empatados_primeiro)} participantes empatados "
+                    "após todos os critérios de desempate. "
+                    "Conforme o regulamento, o prêmio deverá ser dividido."
+                )
 
         if df_ranking['total_pontos'].sum() > 0:
             st.subheader("Desempenho Visual")
@@ -434,7 +407,7 @@ if len(empatados_primeiro) > 1:
             
             st.pyplot(fig)
 
-# # --- ABA 3: REGRAS ---
+# --- ABA 3: REGRAS ---
 with aba3:
     st.header("📜 Regras do Bolão DIRCO 2026")
 
@@ -443,8 +416,7 @@ with aba3:
 **R$ 100,00**
 
 ### 2. PIX para Pagamento
-**glaucorisperi@bb.com.br**  
-(Banco do Brasil)
+**glaucorisperi@bb.com.br** (Banco do Brasil)
 
 ### 3. Prazo para Envio dos Palpites
 Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
@@ -456,9 +428,7 @@ Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
 ## 4. Sistema de Pontuação
 
 ### Exemplo 1
-
-**Resultado Oficial:**  
-Brasil **2 x 1** Marrocos
+**Resultado Oficial:** Brasil **2 x 1** Marrocos
 
 | Palpite | Pontos | Critério |
 |----------|---------|----------|
@@ -470,9 +440,7 @@ Brasil **2 x 1** Marrocos
 | Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |
 
 ### Exemplo 2
-
-**Resultado Oficial:**  
-Brasil **2 x 2** Marrocos
+**Resultado Oficial:** Brasil **2 x 2** Marrocos
 
 | Palpite | Pontos | Critério |
 |----------|---------|----------|
@@ -507,9 +475,7 @@ Maior quantidade de **acertos dos gols do vencedor do jogo**.
 ### 6.3
 Persistindo o empate, o prêmio será dividido entre os participantes empatados.
 
-**Exemplo:**  
-Empate entre dois participantes em 2º lugar.
-
+**Exemplo:** Empate entre dois participantes em 2º lugar.
 Soma-se o valor destinado ao **2º e ao 3º colocado** e divide-se igualmente entre os dois participantes.
 """)
 
@@ -546,7 +512,7 @@ with aba4:
             st.success("Tabela Oficial atualizada! Recarregando o sistema...")
             st.rerun() 
             
-        st.write("") # Espaçamento
+        st.write("") 
         if st.button("🔄 Atualizar App e Ranking (Forçar Leitura)"):
             st.cache_data.clear()
             st.rerun()
@@ -596,132 +562,58 @@ with aba4:
 # ABA 5 - CONSULTAR MEUS PALPITES
 # ==========================================
 with aba5:
-
     st.header("🔎 Consultar Meus Palpites")
 
-    st.info(
-        "Digite o e-mail utilizado no cadastro para visualizar "
-        "os palpites registrados."
-    )
+    st.info("Digite o e-mail utilizado no cadastro para visualizar os palpites registrados.")
 
-    email_consulta = st.text_input(
-        "E-mail utilizado no cadastro",
-        key="consulta_email"
-    )
+    email_consulta = st.text_input("E-mail utilizado no cadastro", key="consulta_email")
 
     if st.button("Buscar Meus Palpites"):
-
         if not email_consulta.strip():
             st.warning("Informe um e-mail.")
         else:
-
-            df_palpites_consulta = conn.read(
-                worksheet="Palpites",
-                ttl=15
-            )
+            df_palpites_consulta = conn.read(worksheet="Palpites", ttl=15)
 
             if df_palpites_consulta.empty:
                 st.error("Nenhum palpite cadastrado.")
             else:
-
                 df_usuario = df_palpites_consulta[
-                    df_palpites_consulta["email"]
-                    .astype(str)
-                    .str.lower()
-                    == email_consulta.lower()
+                    df_palpites_consulta["email"].astype(str).str.lower() == email_consulta.lower()
                 ]
 
                 if len(df_usuario) == 0:
-                    st.error(
-                        "Nenhum palpite encontrado para este e-mail."
-                    )
-
+                    st.error("Nenhum palpite encontrado para este e-mail.")
                 else:
-
                     nome_usuario = df_usuario.iloc[0]["nome"]
-
-                    st.success(
-                        f"Palpites encontrados para {nome_usuario}"
-                    )
+                    st.success(f"Palpites encontrados para {nome_usuario}")
 
                     df_exibicao = pd.merge(
                         df_usuario,
-                        df_oficiais[
-                            [
-                                "game_id",
-                                "data",
-                                "grupo",
-                                "local",
-                                "team_a",
-                                "team_b"
-                            ]
-                        ],
+                        df_oficiais[["game_id", "data", "grupo", "local", "team_a", "team_b"]],
                         on="game_id",
                         how="left"
                     )
 
-                    grupos = sorted(
-                        df_exibicao["grupo"]
-                        .dropna()
-                        .unique()
-                    )
+                    grupos = sorted(df_exibicao["grupo"].dropna().unique())
 
                     for grupo in grupos:
-
-                        with st.expander(
-                            f"Grupo {grupo}",
-                            expanded=False
-                        ):
-
-                            jogos_grupo = df_exibicao[
-                                df_exibicao["grupo"] == grupo
-                            ]
-
+                        with st.expander(f"Grupo {grupo}", expanded=False):
+                            jogos_grupo = df_exibicao[df_exibicao["grupo"] == grupo]
                             for _, jogo in jogos_grupo.iterrows():
-
                                 st.markdown(
-                                    f"""
-**📅 {jogo['data']}**
-
-**{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}**
-
-📍 {jogo['local']}
-"""
+                                    f"**📅 {jogo['data']}**\n\n"
+                                    f"**{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}**\n\n"
+                                    f"📍 {jogo['local']}"
                                 )
-
                     st.divider()
-
                     st.subheader("📋 Resumo Completo")
 
-                    tabela = df_exibicao[
-                        [
-                            "data",
-                            "grupo",
-                            "team_a",
-                            "pred_a",
-                            "pred_b",
-                            "team_b"
-                        ]
-                    ].copy()
+                    tabela = df_exibicao[["data", "grupo", "team_a", "pred_a", "pred_b", "team_b"]].copy()
+                    tabela.columns = ["Data", "Grupo", "Seleção A", "Gols A", "Gols B", "Seleção B"]
 
-                    tabela.columns = [
-                        "Data",
-                        "Grupo",
-                        "Seleção A",
-                        "Gols A",
-                        "Gols B",
-                        "Seleção B"
-                    ]
+                    st.dataframe(tabela, use_container_width=True, hide_index=True)
 
-                    st.dataframe(
-                        tabela,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-                    csv = tabela.to_csv(
-                        index=False
-                    ).encode("utf-8-sig")
+                    csv = tabela.to_csv(index=False).encode("utf-8-sig")
 
                     st.download_button(
                         "📥 Baixar Meus Palpites",
