@@ -13,7 +13,6 @@ st.set_page_config(page_title="Bolão DIRCO - Copa do Mundo 2026", page_icon="�
 SENHA_ADMIN = "dirco2026" 
 
 # TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites (Horário de Brasília)
-# Formato: "Ano-Mês-Dia Hora:Minuto:Segundo"
 PRAZO_FINAL = pd.Timestamp("2026-06-11 14:00:00", tz="America/Sao_Paulo")
 
 # CSS Blindado contra o "Dark Mode" do Streamlit e cores da DIRCO
@@ -128,11 +127,10 @@ def carregar_jogos_iniciais():
     return pd.DataFrame(world_cup_games)
 
 # ==========================================
-# 2. CONEXÃO COM GOOGLE SHEETS E REGRAS DE CACHE
+# 2. CONEXÃO COM GOOGLE SHEETS
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Atualizado com ttl=15 para respeitar as cotas do Google
 df_oficiais = conn.read(worksheet="Resultados", ttl=15) 
 
 precisa_atualizar = False
@@ -270,7 +268,7 @@ with aba1:
                         df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
                         
                         conn.update(worksheet="Palpites", data=df_final)
-                        st.cache_data.clear() # Limpa o cache ao enviar um novo palpite
+                        st.cache_data.clear()
                         st.success(f"Palpites de {nome_participante} registrados com segurança! O formulário foi limpo para a próxima pessoa.")
 
 # --- ABA 2: RANKING E DASHBOARD ---
@@ -300,10 +298,23 @@ with aba2:
         df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos'], ascending=[False, False]).reset_index(drop=True)
         df_ranking.index = df_ranking.index + 1
 
+        # Pódio Atualizado com os 3 primeiros colocados
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Líder do Bolão", df_ranking.iloc[0]['nome'])
-        col_m2.metric("Maior Pontuação", int(df_ranking.iloc[0]['total_pontos']))
-        col_m3.metric("Total de Participantes", len(df_ranking))
+        
+        if len(df_ranking) > 0:
+            col_m1.metric("🥇 1º Colocado", df_ranking.iloc[0]['nome'], f"{int(df_ranking.iloc[0]['total_pontos'])} pts", delta_color="off")
+        else:
+            col_m1.metric("🥇 1º Colocado", "-", "-")
+            
+        if len(df_ranking) > 1:
+            col_m2.metric("🥈 2º Colocado", df_ranking.iloc[1]['nome'], f"{int(df_ranking.iloc[1]['total_pontos'])} pts", delta_color="off")
+        else:
+            col_m2.metric("🥈 2º Colocado", "-", "-")
+            
+        if len(df_ranking) > 2:
+            col_m3.metric("🥉 3º Colocado", df_ranking.iloc[2]['nome'], f"{int(df_ranking.iloc[2]['total_pontos'])} pts", delta_color="off")
+        else:
+            col_m3.metric("🥉 3º Colocado", "-", "-")
 
         st.dataframe(df_ranking[['nome', 'total_pontos', 'placares_exatos']], use_container_width=True)
 
@@ -335,21 +346,30 @@ with aba2:
             ax.tick_params(axis='y', colors='#003882')
             
             st.pyplot(fig)
-        else:
-            st.warning("O ranking está zerado pois nenhum resultado oficial foi inserido pelo Admin ainda.")
 
-# --- ABA 3: REGRAS ---
+# --- ABA 3: REGRAS (ATUALIZADA COM A PREMIAÇÃO) ---
 with aba3:
     st.header("Regras do Bolão")
+    
+    st.subheader("💰 Premiação")
     st.markdown("""
-    **Sistema de Pontuação:**
+    O valor total arrecadado com as inscrições será dividido da seguinte forma:
+    * 🥇 **1º Lugar:** 60% da arrecadação
+    * 🥈 **2º Lugar:** 30% da arrecadação
+    * 🥉 **3º Lugar:** 10% da arrecadação
+    """)
+    
+    st.divider()
+    
+    st.subheader("⚽ Sistema de Pontuação")
+    st.markdown("""
     * **10 pts:** Acerto do Placar Exato.
     * **06 pts:** Acerto do Vencedor + Gols do Vencedor.
     * **05 pts:** Acerto do Empate sem placar exato / Acerto Vencedor + Gols Perdedor.
     * **04 pts:** Acerto somente do Vencedor.
     """)
 
-# --- ABA 4: PAINEL ADMIN COM ATUALIZAÇÃO AUTOMÁTICA ---
+# --- ABA 4: PAINEL ADMIN ---
 with aba4:
     st.header("⚙️ Controle do Administrador")
     senha_input = st.text_input("Digite a Senha de Acesso:", type="password")
@@ -378,19 +398,41 @@ with aba4:
         
         if st.button("💾 Salvar Resultados na Planilha"):
             conn.update(worksheet="Resultados", data=df_atualizado)
-            st.cache_data.clear() # Limpa a memória instantaneamente!
+            st.cache_data.clear()
             st.success("Tabela Oficial atualizada! Recarregando o sistema...")
             st.rerun() 
             
         st.write("") # Espaçamento
         if st.button("🔄 Atualizar App e Ranking (Forçar Leitura)"):
-            st.cache_data.clear() # Limpa a memória antes de recarregar
+            st.cache_data.clear()
             st.rerun()
             
         st.divider()
-        st.subheader("⚠️ Área de Perigo")
+        st.subheader("🗑️ Excluir Palpites de um Usuário")
         
-        if st.button("🚨 ZERAR O BOLÃO PARA ENTRAR EM PRODUÇÃO"):
+        df_palpites_admin = conn.read(worksheet="Palpites", ttl=15)
+        if not df_palpites_admin.empty and 'email' in df_palpites_admin.columns:
+            usuarios_cadastrados = df_palpites_admin['email'].dropna().unique()
+            
+            if len(usuarios_cadastrados) > 0:
+                usuario_para_excluir = st.selectbox("Selecione o e-mail do participante que deseja remover:", usuarios_cadastrados)
+                
+                if st.button("❌ Apagar Palpites Deste Usuário"):
+                    df_palpites_limpo = df_palpites_admin[df_palpites_admin['email'] != usuario_para_excluir]
+                    conn.update(worksheet="Palpites", data=df_palpites_limpo)
+                    
+                    st.cache_data.clear()
+                    st.success(f"Todos os palpites de {usuario_para_excluir} foram deletados com sucesso!")
+                    st.rerun()
+            else:
+                st.info("Nenhum participante registrado ainda.")
+        else:
+            st.info("Nenhum participante registrado ainda.")
+            
+        st.divider()
+        st.subheader("⚠️ Área de Perigo Total")
+        
+        if st.button("🚨 ZERAR O BOLÃO INTEIRO PARA ENTRAR EM PRODUÇÃO"):
             df_zerado_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
             conn.update(worksheet="Palpites", data=df_zerado_palpites)
             
@@ -399,7 +441,7 @@ with aba4:
             df_zerado_resultados['real_b'] = np.nan
             conn.update(worksheet="Resultados", data=df_zerado_resultados)
             
-            st.cache_data.clear() # Esvazia a memória do app
+            st.cache_data.clear()
             st.success("SISTEMA RESETADO! A planilha foi limpa e está pronta para uso.")
             st.rerun()
             
