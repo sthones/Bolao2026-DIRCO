@@ -361,27 +361,84 @@ with aba2:
             
             st.pyplot(fig)
 
-# --- ABA 3: REGRAS (ATUALIZADA COM A PREMIAÇÃO) ---
+# # --- ABA 3: REGRAS ---
 with aba3:
-    st.header("Regras do Bolão")
-    
-    st.subheader("💰 Premiação")
+    st.header("📜 Regras do Bolão DIRCO 2026")
+
     st.markdown("""
-    O valor total arrecadado com as inscrições será dividido da seguinte forma:
-    * 🥇 **1º Lugar:** 60% da arrecadação
-    * 🥈 **2º Lugar:** 30% da arrecadação
-    * 🥉 **3º Lugar:** 10% da arrecadação
-    """)
-    
-    st.divider()
-    
-    st.subheader("⚽ Sistema de Pontuação")
-    st.markdown("""
-    * **10 pts:** Acerto do Placar Exato.
-    * **06 pts:** Acerto do Vencedor + Gols do Vencedor.
-    * **05 pts:** Acerto do Empate sem placar exato / Acerto Vencedor + Gols Perdedor.
-    * **04 pts:** Acerto somente do Vencedor.
-    """)
+### 1. Valor da Inscrição
+**R$ 100,00**
+
+### 2. PIX para Pagamento
+**glaucorisperi@bb.com.br**  
+(Banco do Brasil)
+
+### 3. Prazo para Envio dos Palpites
+Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
+
+**11/06/2026 às 12h00 (Horário de Brasília)**
+
+---
+
+## 4. Sistema de Pontuação
+
+### Exemplo 1
+
+**Resultado Oficial:**  
+Brasil **2 x 1** Marrocos
+
+| Palpite | Pontos | Critério |
+|----------|---------|----------|
+| Brasil 0 x 1 Marrocos | 0 | Errou resultado |
+| Brasil 0 x 0 Marrocos | 0 | Errou resultado |
+| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |
+| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |
+| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |
+| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |
+
+### Exemplo 2
+
+**Resultado Oficial:**  
+Brasil **2 x 2** Marrocos
+
+| Palpite | Pontos | Critério |
+|----------|---------|----------|
+| Brasil 1 x 0 Marrocos | 0 | Errou resultado |
+| Brasil 1 x 2 Marrocos | 0 | Errou resultado |
+| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |
+| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |
+
+---
+
+## 5. Premiação
+
+### 🥇 Primeiro Lugar
+**60% da arrecadação**
+
+### 🥈 Segundo Lugar
+**30% da arrecadação**
+
+### 🥉 Terceiro Lugar
+**10% da arrecadação**
+
+---
+
+## 6. Critérios de Desempate
+
+### 6.1
+Maior quantidade de **placares exatos**.
+
+### 6.2
+Maior quantidade de **acertos dos gols do vencedor do jogo**.
+
+### 6.3
+Persistindo o empate, o prêmio será dividido entre os participantes empatados.
+
+**Exemplo:**  
+Empate entre dois participantes em 2º lugar.
+
+Soma-se o valor destinado ao **2º e ao 3º colocado** e divide-se igualmente entre os dois participantes.
+""")
 
 # --- ABA 4: PAINEL ADMIN ---
 with aba4:
