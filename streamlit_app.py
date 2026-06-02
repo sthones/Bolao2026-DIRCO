@@ -209,13 +209,14 @@ def acerto_gols_vencedor(row):
 # ==========================================
 st.title("🏆 Bolão DIRCO - Copa do Mundo 2026")
 
-aba1, aba2, aba3, aba4, aba5 = st.tabs(
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     [
         "📝 Fazer Palpites",
         "📊 Ranking",
         "📜 Regras",
         "⚙️ Admin",
-        "🔎 Consultar Meus Palpites"
+        "🔎 Consultar Meus Palpites",
+        "🔮 Simulador"
     ]
 )
 
@@ -258,10 +259,8 @@ with aba1:
                         col1, col2, col3, col4, col5 = st.columns([2.5, 1, 0.5, 1, 2.5])
 
                         with col1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
-                        # Adicionado value=None para permitir que a caixa fique em branco inicialmente
                         with col2: gols_a = st.number_input("", key=f"a_{row['game_id']}", step=1, min_value=0, value=None, label_visibility="collapsed")
                         with col3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
-                        # Adicionado value=None para permitir que a caixa fique em branco inicialmente
                         with col4: gols_b = st.number_input("", key=f"b_{row['game_id']}", step=1, min_value=0, value=None, label_visibility="collapsed")
                         with col5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
 
@@ -289,12 +288,11 @@ with aba1:
                     else:
                         id_part = f"P{len(df_palpites_verificacao['email'].unique()) + 1:02d}"
                         
-                        # --- MÁGICA DO ZERO AUTOMÁTICO ---
+                        # Mágica do Zero Automático
                         for p in novos_palpites:
                             p['participant_id'] = id_part
                             if p['pred_a'] is None: p['pred_a'] = 0
                             if p['pred_b'] is None: p['pred_b'] = 0
-                        # ---------------------------------
                         
                         df_novos = pd.DataFrame(novos_palpites)
                         df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
@@ -621,3 +619,75 @@ with aba5:
                         file_name=f"palpites_{nome_usuario}.csv",
                         mime="text/csv"
                     )
+
+# ==========================================
+# ABA 6 - SIMULADOR DE RESULTADOS
+# ==========================================
+with aba6:
+    st.header("🔮 Simulador de Resultados")
+    st.info("Brinque com os placares dos jogos para ver como ficaria a classificação geral! **As alterações feitas aqui não são salvas no banco de dados e não afetam o ranking oficial.**")
+
+    df_palpites_sim = conn.read(worksheet="Palpites", ttl=15)
+    df_oficiais_sim = conn.read(worksheet="Resultados", ttl=15)
+
+    if df_palpites_sim.empty or len(df_palpites_sim.dropna(subset=['email'])) == 0:
+        st.warning("Nenhum palpite registrado ainda para fazer simulações.")
+    else:
+        st.subheader("1. Digite seus resultados hipotéticos")
+        
+        df_simulacao = df_oficiais_sim.copy()
+        
+        df_editado = st.data_editor(
+            df_simulacao,
+            column_config={
+                "game_id": st.column_config.TextColumn("ID", disabled=True),
+                "data": st.column_config.TextColumn("Data", disabled=True),
+                "local": st.column_config.TextColumn("Sede", disabled=True),
+                "grupo": st.column_config.TextColumn("Grupo", disabled=True),
+                "team_a": st.column_config.TextColumn("Seleção A", disabled=True),
+                "team_b": st.column_config.TextColumn("Seleção B", disabled=True),
+                "real_a": st.column_config.NumberColumn("Gols A (Simulação)", min_value=0, step=1),
+                "real_b": st.column_config.NumberColumn("Gols B (Simulação)", min_value=0, step=1)
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="simulador_editor"
+        )
+
+        st.subheader("2. Veja como ficaria a tabela")
+        
+        if st.button("🚀 Calcular Ranking Simulado"):
+            df_analise_sim = pd.merge(df_palpites_sim, df_editado[['game_id', 'real_a', 'real_b']], on='game_id', how='left')
+            
+            df_analise_sim['real_a'] = pd.to_numeric(df_analise_sim['real_a'], errors='coerce')
+            df_analise_sim['real_b'] = pd.to_numeric(df_analise_sim['real_b'], errors='coerce')
+            df_analise_sim['pred_a'] = pd.to_numeric(df_analise_sim['pred_a'], errors='coerce')
+            df_analise_sim['pred_b'] = pd.to_numeric(df_analise_sim['pred_b'], errors='coerce')
+            
+            df_analise_sim['pontos'] = df_analise_sim.apply(calculate_score, axis=1)
+            df_analise_sim['acerto_vencedor'] = df_analise_sim.apply(acerto_gols_vencedor, axis=1)
+
+            df_ranking_sim = df_analise_sim.groupby(['email', 'nome']).agg(
+                total_pontos=('pontos', 'sum'),
+                placares_exatos=('pontos', lambda x: (x == 10).sum()),
+                gols_vencedor=('acerto_vencedor', 'sum')
+            ).reset_index()
+
+            df_ranking_sim = df_ranking_sim.sort_values(
+                by=['total_pontos', 'placares_exatos', 'gols_vencedor'],
+                ascending=[False, False, False]
+            ).reset_index(drop=True)
+            df_ranking_sim.index = df_ranking_sim.index + 1
+
+            st.dataframe(
+                df_ranking_sim[['nome', 'total_pontos', 'placares_exatos', 'gols_vencedor']].rename(
+                    columns={
+                        'nome': 'Participante',
+                        'total_pontos': 'Pontos Simulação',
+                        'placares_exatos': 'Placares Exatos',
+                        'gols_vencedor': 'Acertos Vencedor'
+                    }
+                ),
+                use_container_width=True
+            )
+            st.success("Cálculo realizado! Altere os placares na tabela acima e clique no botão novamente para testar novos cenários.")
