@@ -188,6 +188,27 @@ def calculate_score(row):
 
     return 0
 
+def acerto_gols_vencedor(row):
+
+    pred_a = row['pred_a']
+    pred_b = row['pred_b']
+    real_a = row['real_a']
+    real_b = row['real_b']
+
+    if pd.isna(real_a) or pd.isna(real_b):
+        return 0
+
+    # Empates não contam
+    if real_a == real_b:
+        return 0
+
+    # Time A venceu
+    if real_a > real_b:
+        return int(pred_a == real_a)
+
+    # Time B venceu
+    return int(pred_b == real_b)
+
 # ==========================================
 # 4. INTERFACE DO STREAMLIT
 # ==========================================
@@ -303,14 +324,36 @@ with aba2:
         df_analise['pred_a'] = pd.to_numeric(df_analise['pred_a'], errors='coerce')
         df_analise['pred_b'] = pd.to_numeric(df_analise['pred_b'], errors='coerce')
         
-        df_analise['pontos'] = df_analise.apply(calculate_score, axis=1)
+        df_analise['pontos'] = df_analise.apply(
+    calculate_score,
+    axis=1
+)
 
-        df_ranking = df_analise.groupby(['email', 'nome']).agg(
-            total_pontos=('pontos', 'sum'),
-            placares_exatos=('pontos', lambda x: (x == 10).sum())
-        ).reset_index()
+df_analise['acerto_vencedor'] = df_analise.apply(
+    acerto_gols_vencedor,
+    axis=1
+)
 
-        df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos'], ascending=[False, False]).reset_index(drop=True)
+df_ranking = df_analise.groupby(
+    ['email', 'nome']
+).agg(
+    total_pontos=('pontos', 'sum'),
+    placares_exatos=('pontos', lambda x: (x == 10).sum()),
+    gols_vencedor=('acerto_vencedor', 'sum')
+).reset_index()
+
+        df_ranking = df_ranking.sort_values(
+    by=[
+        'total_pontos',
+        'placares_exatos',
+        'gols_vencedor'
+    ],
+    ascending=[
+        False,
+        False,
+        False
+    ]
+).reset_index(drop=True)
         df_ranking.index = df_ranking.index + 1
 
         col_m1, col_m2, col_m3 = st.columns(3)
@@ -330,7 +373,37 @@ with aba2:
         else:
             col_m3.metric("🥉 3º Colocado", "-", "-")
 
-        st.dataframe(df_ranking[['nome', 'total_pontos', 'placares_exatos']], use_container_width=True)
+        st.dataframe(
+    df_ranking[
+        [
+            'nome',
+            'total_pontos',
+            'placares_exatos',
+            'gols_vencedor'
+        ]
+    ].rename(
+        columns={
+            'nome': 'Participante',
+            'total_pontos': 'Pontos',
+            'placares_exatos': 'Placares Exatos',
+            'gols_vencedor': 'Acertos Gols Vencedor'
+        }
+    ),
+    use_container_width=True
+)
+        top = df_ranking.iloc[0]
+
+empatados_primeiro = df_ranking[
+    (df_ranking['total_pontos'] == top['total_pontos']) &
+    (df_ranking['placares_exatos'] == top['placares_exatos']) &
+    (df_ranking['gols_vencedor'] == top['gols_vencedor'])
+]
+if len(empatados_primeiro) > 1:
+    st.warning(
+        f"🏆 Existem {len(empatados_primeiro)} participantes empatados "
+        "após todos os critérios de desempate. "
+        "Conforme o regulamento, o prêmio deverá ser dividido."
+    )
 
         if df_ranking['total_pontos'].sum() > 0:
             st.subheader("Desempenho Visual")
