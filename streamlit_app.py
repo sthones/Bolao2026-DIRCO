@@ -195,7 +195,7 @@ st.title("🏆 Bolão DIRCO - Copa do Mundo 2026")
 
 aba1, aba2, aba3, aba4 = st.tabs(["📝 Fazer Palpites", "📊 Ranking", "📜 Regras", "⚙️ Admin"])
 
-# --- ABA 1: FORMULÁRIO DE PALPITES (COM TRAVA DE TEMPO) ---
+# --- ABA 1: FORMULÁRIO DE PALPITES (COM TRAVA DE TEMPO E ORDENAÇÃO) ---
 with aba1:
     agora = pd.Timestamp.now(tz="America/Sao_Paulo")
     
@@ -213,7 +213,9 @@ with aba1:
             
             st.subheader("Fase de Grupos")
             novos_palpites = []
-            grupos_unicos = df_oficiais['grupo'].dropna().unique()
+            
+            # ATUALIZAÇÃO AQUI: Organiza os grupos rigorosamente em ordem alfabética (A, B, C, D...)
+            grupos_unicos = sorted(df_oficiais['grupo'].dropna().unique())
             
             for grupo in grupos_unicos:
                 with st.expander(f"Jogos do Grupo {grupo}", expanded=False):
@@ -261,16 +263,21 @@ with aba1:
                         st.error("Já existe um palpite registrado com este e-mail!")
                     else:
                         id_part = f"P{len(df_palpites_verificacao['email'].unique()) + 1:02d}"
+                        
+                        # --- AQUI ESTÁ A MÁGICA DO ZERO AUTOMÁTICO ---
                         for p in novos_palpites:
                             p['participant_id'] = id_part
+                            # Se o valor for None ou vazio, vira 0
+                            if p['pred_a'] is None: p['pred_a'] = 0
+                            if p['pred_b'] is None: p['pred_b'] = 0
+                        # ---------------------------------------------
                         
                         df_novos = pd.DataFrame(novos_palpites)
                         df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
                         
                         conn.update(worksheet="Palpites", data=df_final)
                         st.cache_data.clear()
-                        st.success(f"Palpites de {nome_participante} registrados com segurança! O formulário foi limpo para a próxima pessoa.")
-
+                        st.success(f"Palpites de {nome_participante} registrados! Jogos vazios foram preenchidos como 0x0.")
 # --- ABA 2: RANKING E DASHBOARD ---
 with aba2:
     st.header("Ranking Atualizado")
@@ -298,7 +305,6 @@ with aba2:
         df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos'], ascending=[False, False]).reset_index(drop=True)
         df_ranking.index = df_ranking.index + 1
 
-        # Pódio Atualizado com os 3 primeiros colocados
         col_m1, col_m2, col_m3 = st.columns(3)
         
         if len(df_ranking) > 0:
