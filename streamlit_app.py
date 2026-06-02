@@ -12,6 +12,10 @@ st.set_page_config(page_title="Bolão DIRCO - Copa do Mundo 2026", page_icon="�
 
 SENHA_ADMIN = "dirco2026" 
 
+# TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites (Horário de Brasília)
+# Formato: "Ano-Mês-Dia Hora:Minuto:Segundo"
+PRAZO_FINAL = pd.Timestamp("2026-06-11 14:00:00", tz="America/Sao_Paulo")
+
 # CSS Blindado contra o "Dark Mode" do Streamlit e cores da DIRCO
 st.markdown("""
     <style>
@@ -193,73 +197,81 @@ st.title("🏆 Bolão DIRCO - Copa do Mundo 2026")
 
 aba1, aba2, aba3, aba4 = st.tabs(["📝 Fazer Palpites", "📊 Ranking", "📜 Regras", "⚙️ Admin"])
 
-# --- ABA 1: FORMULÁRIO DE PALPITES ---
+# --- ABA 1: FORMULÁRIO DE PALPITES (COM TRAVA DE TEMPO) ---
 with aba1:
-    st.header("Envie seus Palpites")
-
-    with st.form("form_palpites", clear_on_submit=True):
-        nome_participante = st.text_input("Seu Nome Completo:", max_chars=50)
-        email_participante = st.text_input("Seu E-mail:")
+    agora = pd.Timestamp.now(tz="America/Sao_Paulo")
+    
+    if agora >= PRAZO_FINAL:
+        st.error("⛔ **PALPITES ENCERRADOS!**")
+        st.warning("O prazo para enviar os palpites expirou, pois a Copa do Mundo já começou (ou está prestes a começar). Acompanhe o seu desempenho na aba **Ranking**!")
+    else:
+        st.info(f"⏳ O formulário ficará aberto até o dia **{PRAZO_FINAL.strftime('%d/%m/%Y às %H:%M')}** (Horário de Brasília).")
         
-        st.subheader("Fase de Grupos")
-        novos_palpites = []
-        grupos_unicos = df_oficiais['grupo'].dropna().unique()
-        
-        for grupo in grupos_unicos:
-            with st.expander(f"Jogos do Grupo {grupo}", expanded=False):
-                jogos_do_grupo = df_oficiais[df_oficiais['grupo'] == grupo]
-                
-                for index, row in jogos_do_grupo.iterrows():
-                    data_jogo = row.get('data', 'Data Indefinida')
-                    local_jogo = row.get('local', 'Sede Indefinida')
-                    t_a = row['team_a']
-                    t_b = row['team_b']
+        st.header("Envie seus Palpites")
+
+        with st.form("form_palpites", clear_on_submit=True):
+            nome_participante = st.text_input("Seu Nome Completo:", max_chars=50)
+            email_participante = st.text_input("Seu E-mail:")
+            
+            st.subheader("Fase de Grupos")
+            novos_palpites = []
+            grupos_unicos = df_oficiais['grupo'].dropna().unique()
+            
+            for grupo in grupos_unicos:
+                with st.expander(f"Jogos do Grupo {grupo}", expanded=False):
+                    jogos_do_grupo = df_oficiais[df_oficiais['grupo'] == grupo]
                     
-                    img_a = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_a, 'un')}.png' width='28' style='vertical-align: middle; margin-left: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
-                    img_b = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_b, 'un')}.png' width='28' style='vertical-align: middle; margin-right: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
-                    
-                    st.markdown(f"<div style='text-align: center; color: #003882; font-size: 13px; font-weight: bold; margin-bottom: 5px; opacity: 0.8;'>📅 {data_jogo} &nbsp;|&nbsp; 📍 {local_jogo}</div>", unsafe_allow_html=True)
-                    
-                    col1, col2, col3, col4, col5 = st.columns([2.5, 1, 0.5, 1, 2.5])
+                    for index, row in jogos_do_grupo.iterrows():
+                        data_jogo = row.get('data', 'Data Indefinida')
+                        local_jogo = row.get('local', 'Sede Indefinida')
+                        t_a = row['team_a']
+                        t_b = row['team_b']
+                        
+                        img_a = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_a, 'un')}.png' width='28' style='vertical-align: middle; margin-left: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
+                        img_b = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_b, 'un')}.png' width='28' style='vertical-align: middle; margin-right: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
+                        
+                        st.markdown(f"<div style='text-align: center; color: #003882; font-size: 13px; font-weight: bold; margin-bottom: 5px; opacity: 0.8;'>📅 {data_jogo} &nbsp;|&nbsp; 📍 {local_jogo}</div>", unsafe_allow_html=True)
+                        
+                        col1, col2, col3, col4, col5 = st.columns([2.5, 1, 0.5, 1, 2.5])
 
-                    with col1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
-                    with col2: gols_a = st.number_input("", key=f"a_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
-                    with col3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
-                    with col4: gols_b = st.number_input("", key=f"b_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
-                    with col5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
+                        with col1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
+                        with col2: gols_a = st.number_input("", key=f"a_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
+                        with col3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
+                        with col4: gols_b = st.number_input("", key=f"b_{row['game_id']}", step=1, min_value=0, label_visibility="collapsed")
+                        with col5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
 
-                    novos_palpites.append({
-                        "participant_id": "",
-                        "nome": nome_participante,
-                        "email": email_participante,
-                        "game_id": row['game_id'],
-                        "pred_a": gols_a,
-                        "pred_b": gols_b
-                    })
-                    st.write("") 
-                    st.divider()
+                        novos_palpites.append({
+                            "participant_id": "",
+                            "nome": nome_participante,
+                            "email": email_participante,
+                            "game_id": row['game_id'],
+                            "pred_a": gols_a,
+                            "pred_b": gols_b
+                        })
+                        st.write("") 
+                        st.divider()
 
-        submit = st.form_submit_button("⚽ Confirmar Meus Palpites")
+            submit = st.form_submit_button("⚽ Confirmar Meus Palpites")
 
-        if submit:
-            if nome_participante.strip() == "" or email_participante.strip() == "":
-                st.error("Por favor, preencha o seu nome e e-mail antes de enviar.")
-            else:
-                df_palpites_verificacao = conn.read(worksheet="Palpites", ttl=15)
-                
-                if not df_palpites_verificacao.empty and email_participante in df_palpites_verificacao['email'].values:
-                    st.error("Já existe um palpite registrado com este e-mail!")
+            if submit:
+                if nome_participante.strip() == "" or email_participante.strip() == "":
+                    st.error("Por favor, preencha o seu nome e e-mail antes de enviar.")
                 else:
-                    id_part = f"P{len(df_palpites_verificacao['email'].unique()) + 1:02d}"
-                    for p in novos_palpites:
-                        p['participant_id'] = id_part
+                    df_palpites_verificacao = conn.read(worksheet="Palpites", ttl=15)
                     
-                    df_novos = pd.DataFrame(novos_palpites)
-                    df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
-                    
-                    conn.update(worksheet="Palpites", data=df_final)
-                    st.cache_data.clear() # Limpa o cache ao enviar um novo palpite
-                    st.success(f"Palpites de {nome_participante} registrados com segurança! O formulário foi limpo para a próxima pessoa.")
+                    if not df_palpites_verificacao.empty and email_participante in df_palpites_verificacao['email'].values:
+                        st.error("Já existe um palpite registrado com este e-mail!")
+                    else:
+                        id_part = f"P{len(df_palpites_verificacao['email'].unique()) + 1:02d}"
+                        for p in novos_palpites:
+                            p['participant_id'] = id_part
+                        
+                        df_novos = pd.DataFrame(novos_palpites)
+                        df_final = pd.concat([df_palpites_verificacao, df_novos], ignore_index=True)
+                        
+                        conn.update(worksheet="Palpites", data=df_final)
+                        st.cache_data.clear() # Limpa o cache ao enviar um novo palpite
+                        st.success(f"Palpites de {nome_participante} registrados com segurança! O formulário foi limpo para a próxima pessoa.")
 
 # --- ABA 2: RANKING E DASHBOARD ---
 with aba2:
