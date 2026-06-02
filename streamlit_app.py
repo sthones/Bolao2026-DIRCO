@@ -193,7 +193,15 @@ def calculate_score(row):
 # ==========================================
 st.title("🏆 Bolão DIRCO - Copa do Mundo 2026")
 
-aba1, aba2, aba3, aba4 = st.tabs(["📝 Fazer Palpites", "📊 Ranking", "📜 Regras", "⚙️ Admin"])
+aba1, aba2, aba3, aba4, aba5 = st.tabs(
+    [
+        "📝 Fazer Palpites",
+        "📊 Ranking",
+        "📜 Regras",
+        "⚙️ Admin",
+        "🔎 Consultar Meus Palpites"
+    ]
+)
 
 # --- ABA 1: FORMULÁRIO DE PALPITES (COM TRAVA DE TEMPO E ORDENAÇÃO) ---
 with aba1:
@@ -453,3 +461,141 @@ with aba4:
             
     elif senha_input != "":
         st.error("Senha incorreta.")
+        
+# ==========================================
+# ABA 5 - CONSULTAR MEUS PALPITES
+# ==========================================
+with aba5:
+
+    st.header("🔎 Consultar Meus Palpites")
+
+    st.info(
+        "Digite o e-mail utilizado no cadastro para visualizar "
+        "os palpites registrados."
+    )
+
+    email_consulta = st.text_input(
+        "E-mail utilizado no cadastro",
+        key="consulta_email"
+    )
+
+    if st.button("Buscar Meus Palpites"):
+
+        if not email_consulta.strip():
+            st.warning("Informe um e-mail.")
+        else:
+
+            df_palpites_consulta = conn.read(
+                worksheet="Palpites",
+                ttl=15
+            )
+
+            if df_palpites_consulta.empty:
+                st.error("Nenhum palpite cadastrado.")
+            else:
+
+                df_usuario = df_palpites_consulta[
+                    df_palpites_consulta["email"]
+                    .astype(str)
+                    .str.lower()
+                    == email_consulta.lower()
+                ]
+
+                if len(df_usuario) == 0:
+                    st.error(
+                        "Nenhum palpite encontrado para este e-mail."
+                    )
+
+                else:
+
+                    nome_usuario = df_usuario.iloc[0]["nome"]
+
+                    st.success(
+                        f"Palpites encontrados para {nome_usuario}"
+                    )
+
+                    df_exibicao = pd.merge(
+                        df_usuario,
+                        df_oficiais[
+                            [
+                                "game_id",
+                                "data",
+                                "grupo",
+                                "local",
+                                "team_a",
+                                "team_b"
+                            ]
+                        ],
+                        on="game_id",
+                        how="left"
+                    )
+
+                    grupos = sorted(
+                        df_exibicao["grupo"]
+                        .dropna()
+                        .unique()
+                    )
+
+                    for grupo in grupos:
+
+                        with st.expander(
+                            f"Grupo {grupo}",
+                            expanded=False
+                        ):
+
+                            jogos_grupo = df_exibicao[
+                                df_exibicao["grupo"] == grupo
+                            ]
+
+                            for _, jogo in jogos_grupo.iterrows():
+
+                                st.markdown(
+                                    f"""
+**📅 {jogo['data']}**
+
+**{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}**
+
+📍 {jogo['local']}
+"""
+                                )
+
+                    st.divider()
+
+                    st.subheader("📋 Resumo Completo")
+
+                    tabela = df_exibicao[
+                        [
+                            "data",
+                            "grupo",
+                            "team_a",
+                            "pred_a",
+                            "pred_b",
+                            "team_b"
+                        ]
+                    ].copy()
+
+                    tabela.columns = [
+                        "Data",
+                        "Grupo",
+                        "Seleção A",
+                        "Gols A",
+                        "Gols B",
+                        "Seleção B"
+                    ]
+
+                    st.dataframe(
+                        tabela,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                    csv = tabela.to_csv(
+                        index=False
+                    ).encode("utf-8-sig")
+
+                    st.download_button(
+                        "📥 Baixar Meus Palpites",
+                        csv,
+                        file_name=f"palpites_{nome_usuario}.csv",
+                        mime="text/csv"
+                    )
