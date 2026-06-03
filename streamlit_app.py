@@ -123,7 +123,7 @@ def carregar_jogos_iniciais():
     return pd.DataFrame(world_cup_games)
 
 # ==========================================
-# 2. CONEXÃO COM GOOGLE SHEETS
+# 2. CONEXÃO COM GOOGLE SHEETS E CACHE
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -162,7 +162,7 @@ flags_iso = {
 }
 
 # ==========================================
-# 3. SISTEMA DE PONTUAÇÃO
+# 3. SISTEMA DE PONTUAÇÃO E CLASSIFICAÇÃO
 # ==========================================
 def calculate_score(row):
     pred_a, pred_b = row['pred_a'], row['pred_b']
@@ -181,25 +181,63 @@ def calculate_score(row):
         if (real_win and pred_a == real_a) or (real_loss and pred_b == real_b): return 6
         if (real_win and pred_b == real_b) or (real_loss and pred_a == real_a): return 5
         return 4
-
     return 0
 
 def acerto_gols_vencedor(row):
-    pred_a = row['pred_a']
-    pred_b = row['pred_b']
-    real_a = row['real_a']
-    real_b = row['real_b']
+    pred_a, pred_b = row['pred_a'], row['pred_b']
+    real_a, real_b = row['real_a'], row['real_b']
 
-    if pd.isna(real_a) or pd.isna(real_b):
-        return 0
-
-    if real_a == real_b:
-        return 0
-
-    if real_a > real_b:
-        return int(pred_a == real_a)
-
+    if pd.isna(real_a) or pd.isna(real_b) or real_a == real_b: return 0
+    if real_a > real_b: return int(pred_a == real_a)
     return int(pred_b == real_b)
+
+def calcular_classificacao_grupo(df_grupo):
+    """Calcula a tabela de classificação de um grupo com base nos resultados reais inseridos."""
+    tabela = {}
+    
+    # Inicializa as seleções na tabela
+    for time in pd.concat([df_grupo['team_a'], df_grupo['team_b']]).unique():
+        tabela[time] = {'Pts': 0, 'J': 0, 'V': 0, 'E': 0, 'D': 0, 'GP': 0, 'GC': 0, 'SG': 0}
+
+    # Calcula os pontos jogo a jogo
+    for _, row in df_grupo.iterrows():
+        ta, tb = row['team_a'], row['team_b']
+        ra, rb = row['real_a'], row['real_b']
+
+        if pd.notna(ra) and pd.notna(rb) and str(ra).strip() != "" and str(rb).strip() != "":
+            ra, rb = int(ra), int(rb)
+            tabela[ta]['J'] += 1
+            tabela[tb]['J'] += 1
+            tabela[ta]['GP'] += ra
+            tabela[tb]['GP'] += rb
+            tabela[ta]['GC'] += rb
+            tabela[tb]['GC'] += ra
+
+            if ra > rb:
+                tabela[ta]['Pts'] += 3
+                tabela[ta]['V'] += 1
+                tabela[tb]['D'] += 1
+            elif ra < rb:
+                tabela[tb]['Pts'] += 3
+                tabela[tb]['V'] += 1
+                tabela[ta]['D'] += 1
+            else:
+                tabela[ta]['Pts'] += 1
+                tabela[tb]['Pts'] += 1
+                tabela[ta]['E'] += 1
+                tabela[tb]['E'] += 1
+
+    # Calcula Saldo de Gols e organiza DataFrame
+    for time in tabela:
+        tabela[time]['SG'] = tabela[time]['GP'] - tabela[time]['GC']
+
+    df_tab = pd.DataFrame.from_dict(tabela, orient='index').reset_index()
+    df_tab = df_tab.rename(columns={'index': 'Seleção'})
+    
+    # Ordenação padrão FIFA: Pontos > Saldo de Gols > Gols Pró
+    df_tab = df_tab.sort_values(by=['Pts', 'SG', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
+    df_tab.index = df_tab.index + 1
+    return df_tab
 
 # ==========================================
 # 4. INTERFACE DO STREAMLIT
@@ -217,7 +255,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     ]
 )
 
-# --- ABA 1: FORMULÁRIO DE PALPITES INTELIGENTE ---
+# --- ABA 1: FORMULÁRIO DE PALPITES (COM RESULTADOS LADO A LADO) ---
 with aba1:
     agora = pd.Timestamp.now(tz="America/Sao_Paulo")
     
@@ -225,11 +263,10 @@ with aba1:
         st.error("⛔ **PALPITES ENCERRADOS!**")
         st.warning("O prazo para enviar os palpites expirou, pois a Copa do Mundo já começou (ou está prestes a começar). Acompanhe o seu desempenho na aba **Ranking**!")
     else:
-        st.info(f"⏳ O formulário ficará aberto para novos envios e alterações até o dia **{PRAZO_FINAL.strftime('%d/%m/%Y às %H:%M')}** (Horário de Brasília).")
+        st.info(f"⏳ O formulário ficará aberto para novos envios e alterações até o dia **{PRAZO_FINAL.strftime('%d/%m/%Y às %H:%M')}** (Horário de Brasília). Se você preencher usando o mesmo e-mail, seus palpites anteriores serão substituídos.")
         
         st.header("Envie ou Altere seus Palpites")
         
-        # ETAPA 1: O usuário insere o email fora do form para buscar dados existentes
         email_input = st.text_input("Digite seu E-mail e aperte 'Enter' para iniciar ou carregar seus palpites:", key="email_inicio")
         
         if email_input:
@@ -237,22 +274,18 @@ with aba1:
             palpites_existentes = {}
             nome_existente = ""
             
-            # Se o usuário já tiver palpites registrados
             if not df_atual.empty and email_input in df_atual['email'].values:
                 st.success("✅ Bem-vindo de volta! Carregamos seus palpites anteriores. Modifique os placares que desejar e clique em Salvar no final da página.")
                 df_usuario = df_atual[df_atual['email'] == email_input]
                 nome_existente = df_usuario.iloc[0]['nome']
                 
-                # Guarda os palpites antigos em um dicionário
                 for _, r in df_usuario.iterrows():
                     palpites_existentes[r['game_id']] = {'pred_a': int(r['pred_a']), 'pred_b': int(r['pred_b'])}
             else:
                 st.info("👋 E-mail novo! Preencha seus dados abaixo. Os jogos estão inicialmente com o placar de 0 x 0.")
 
-            # ETAPA 2: O formulário é gerado já preenchido com os palpites (ou 0x0 se for novo)
             with st.form("form_palpites", clear_on_submit=False):
                 nome_participante = st.text_input("Seu Nome Completo:", value=nome_existente, max_chars=50)
-                
                 st.subheader("Fase de Grupos")
                 novos_palpites = []
                 
@@ -262,40 +295,53 @@ with aba1:
                     with st.expander(f"Jogos do Grupo {grupo}", expanded=False):
                         jogos_do_grupo = df_oficiais[df_oficiais['grupo'] == grupo]
                         
-                        for index, row in jogos_do_grupo.iterrows():
-                            g_id = row['game_id']
-                            data_jogo = row.get('data', 'Data Indefinida')
-                            local_jogo = row.get('local', 'Sede Indefinida')
-                            t_a = row['team_a']
-                            t_b = row['team_b']
-                            
-                            img_a = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_a, 'un')}.png' width='28' style='vertical-align: middle; margin-left: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
-                            img_b = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_b, 'un')}.png' width='28' style='vertical-align: middle; margin-right: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
-                            
-                            st.markdown(f"<div style='text-align: center; color: #003882; font-size: 13px; font-weight: bold; margin-bottom: 5px; opacity: 0.8;'>📅 {data_jogo} &nbsp;|&nbsp; 📍 {local_jogo}</div>", unsafe_allow_html=True)
-                            
-                            # Define o valor inicial (0 se for novo, ou o valor que ele palpitou antes)
-                            val_a = palpites_existentes.get(g_id, {}).get('pred_a', 0)
-                            val_b = palpites_existentes.get(g_id, {}).get('pred_b', 0)
-                            
-                            col1, col2, col3, col4, col5 = st.columns([2.5, 1, 0.5, 1, 2.5])
+                        # --- DIVISÃO EM COLUNAS ---
+                        col_palpites, col_info = st.columns([1.5, 1], gap="large")
+                        
+                        # LADO ESQUERDO: O FORMULÁRIO DE PALPITES
+                        with col_palpites:
+                            for index, row in jogos_do_grupo.iterrows():
+                                g_id = row['game_id']
+                                data_jogo = row.get('data', 'Data Indefinida')
+                                local_jogo = row.get('local', 'Sede Indefinida')
+                                t_a, t_b = row['team_a'], row['team_b']
+                                
+                                img_a = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_a, 'un')}.png' width='28' style='vertical-align: middle; margin-left: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
+                                img_b = f"<img src='https://flagcdn.com/32x24/{flags_iso.get(t_b, 'un')}.png' width='28' style='vertical-align: middle; margin-right: 10px; border-radius: 3px; box-shadow: 1px 1px 3px rgba(0,0,0,0.3);'>"
+                                
+                                st.markdown(f"<div style='text-align: center; color: #003882; font-size: 13px; font-weight: bold; margin-bottom: 5px; opacity: 0.8;'>📅 {data_jogo} &nbsp;|&nbsp; 📍 {local_jogo}</div>", unsafe_allow_html=True)
+                                
+                                val_a = palpites_existentes.get(g_id, {}).get('pred_a', 0)
+                                val_b = palpites_existentes.get(g_id, {}).get('pred_b', 0)
+                                
+                                c1, c2, c3, c4, c5 = st.columns([2.5, 1, 0.5, 1, 2.5])
+                                with c1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
+                                with c2: gols_a = st.number_input("", key=f"a_{g_id}", step=1, min_value=0, value=val_a, label_visibility="collapsed")
+                                with c3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
+                                with c4: gols_b = st.number_input("", key=f"b_{g_id}", step=1, min_value=0, value=val_b, label_visibility="collapsed")
+                                with c5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
 
-                            with col1: st.markdown(f"<h5 style='text-align: right; color:#003882; margin-top:3px;'>{t_a} {img_a}</h5>", unsafe_allow_html=True)
-                            with col2: gols_a = st.number_input("", key=f"a_{g_id}", step=1, min_value=0, value=val_a, label_visibility="collapsed")
-                            with col3: st.markdown("<h5 style='text-align: center; color:#003882; margin-top:3px;'>X</h5>", unsafe_allow_html=True)
-                            with col4: gols_b = st.number_input("", key=f"b_{g_id}", step=1, min_value=0, value=val_b, label_visibility="collapsed")
-                            with col5: st.markdown(f"<h5 style='text-align: left; color:#003882; margin-top:3px;'>{img_b} {t_b}</h5>", unsafe_allow_html=True)
-
-                            novos_palpites.append({
-                                "participant_id": "", # Será preenchido ao salvar
-                                "nome": nome_participante,
-                                "email": email_input, # Usa o e-mail que está fora do formulário
-                                "game_id": g_id,
-                                "pred_a": gols_a,
-                                "pred_b": gols_b
-                            })
-                            st.write("") 
-                            st.divider()
+                                novos_palpites.append({
+                                    "participant_id": "", "nome": nome_participante, "email": email_input, 
+                                    "game_id": g_id, "pred_a": gols_a, "pred_b": gols_b
+                                })
+                                st.write("")
+                                st.divider()
+                                
+                        # LADO DIREITO: TABELA DO GRUPO E RESULTADOS REAIS
+                        with col_info:
+                            st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
+                            df_classificacao = calcular_classificacao_grupo(jogos_do_grupo)
+                            # Mostra as colunas essenciais: Seleção, Pontos, Jogos, Saldo de Gols
+                            st.dataframe(df_classificacao[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
+                            
+                            st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
+                            for _, row in jogos_do_grupo.iterrows():
+                                ra, rb = row['real_a'], row['real_b']
+                                if pd.notna(ra) and pd.notna(rb) and str(ra).strip() != "":
+                                    st.markdown(f"<div style='text-align: center; font-size: 14px;'>{row['team_a']} <b>{int(ra)} x {int(rb)}</b> {row['team_b']}</div>", unsafe_allow_html=True)
+                                else:
+                                    st.markdown(f"<div style='text-align: center; font-size: 14px; color: gray;'>{row['team_a']} - x - {row['team_b']}</div>", unsafe_allow_html=True)
 
                 submit = st.form_submit_button("⚽ Salvar Palpites")
 
@@ -305,24 +351,20 @@ with aba1:
                     else:
                         df_atualizacao = conn.read(worksheet="Palpites", ttl=15)
                         
-                        # Verifica se é uma edição (e-mail já existe) ou um cadastro novo
                         if not df_atualizacao.empty and email_input in df_atualizacao['email'].values:
-                            # Mantém o ID antigo do usuário para não duplicar no banco
                             id_part = df_atualizacao[df_atualizacao['email'] == email_input]['participant_id'].iloc[0]
-                            # Remove os palpites antigos da tabela
                             df_tabela_limpa = df_atualizacao[df_atualizacao['email'] != email_input]
                         else:
-                            # Cria um ID novo para o novo usuário
                             num_usuarios = 0 if df_atualizacao.empty else len(df_atualizacao['email'].unique())
                             id_part = f"P{num_usuarios + 1:02d}"
                             df_tabela_limpa = df_atualizacao
                         
-                        # Atribui o ID (antigo ou novo) para todos os palpites confirmados agora
                         for p in novos_palpites:
                             p['participant_id'] = id_part
+                            if p['pred_a'] is None: p['pred_a'] = 0
+                            if p['pred_b'] is None: p['pred_b'] = 0
                             
                         df_novos = pd.DataFrame(novos_palpites)
-                        # Junta a tabela antiga limpa com os novos palpites e sobrescreve
                         df_final = pd.concat([df_tabela_limpa, df_novos], ignore_index=True)
                         
                         conn.update(worksheet="Palpites", data=df_final)
@@ -585,14 +627,14 @@ with aba4:
         st.error("Senha incorreta.")
         
 # ==========================================
-# ABA 5 - CONSULTAR MEUS PALPITES
+# ABA 5 - CONSULTAR MEUS PALPITES (COM RESULTADOS LADO A LADO)
 # ==========================================
 with aba5:
     st.header("🔎 Consultar Meus Palpites")
 
     st.info("Digite o e-mail utilizado no cadastro para visualizar os palpites registrados.")
 
-    email_consulta = st.text_input("E-mail utilizado no cadastro", key="consulta_email")
+    email_consulta = st.text_input("E-mail utilizado no cadastro", key="consulta_email_aba5")
 
     if st.button("Buscar Meus Palpites"):
         if not email_consulta.strip():
@@ -624,13 +666,37 @@ with aba5:
 
                     for grupo in grupos:
                         with st.expander(f"Grupo {grupo}", expanded=False):
+                            
+                            # DIVISÃO EM COLUNAS TAMBÉM NA CONSULTA!
+                            col_meus, col_reais = st.columns([1.5, 1], gap="large")
+                            
                             jogos_grupo = df_exibicao[df_exibicao["grupo"] == grupo]
-                            for _, jogo in jogos_grupo.iterrows():
-                                st.markdown(
-                                    f"**📅 {jogo['data']}**\n\n"
-                                    f"**{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}**\n\n"
-                                    f"📍 {jogo['local']}"
-                                )
+                            
+                            with col_meus:
+                                st.markdown("<h6 style='text-align: center; color:#003882;'>O Que Eu Apostei</h6>", unsafe_allow_html=True)
+                                for _, jogo in jogos_grupo.iterrows():
+                                    st.markdown(
+                                        f"**📅 {jogo['data']}**<br>"
+                                        f"<b>{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}</b><br>"
+                                        f"📍 {jogo['local']}", unsafe_allow_html=True
+                                    )
+                                    st.divider()
+                                    
+                            with col_reais:
+                                df_ofc_grupo = df_oficiais[df_oficiais['grupo'] == grupo]
+                                st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
+                                df_class_aba5 = calcular_classificacao_grupo(df_ofc_grupo)
+                                st.dataframe(df_class_aba5[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
+                                
+                                st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
+                                for _, row in df_ofc_grupo.iterrows():
+                                    ra, rb = row['real_a'], row['real_b']
+                                    if pd.notna(ra) and pd.notna(rb) and str(ra).strip() != "":
+                                        st.markdown(f"<div style='text-align: center; font-size: 14px;'>{row['team_a']} <b>{int(ra)} x {int(rb)}</b> {row['team_b']}</div>", unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"<div style='text-align: center; font-size: 14px; color: gray;'>{row['team_a']} - x - {row['team_b']}</div>", unsafe_allow_html=True)
+                                
+
                     st.divider()
                     st.subheader("📋 Resumo Completo")
 
