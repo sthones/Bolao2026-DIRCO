@@ -192,14 +192,11 @@ def acerto_gols_vencedor(row):
     return int(pred_b == real_b)
 
 def calcular_classificacao_grupo(df_grupo):
-    """Calcula a tabela de classificação de um grupo com base nos resultados reais inseridos."""
     tabela = {}
     
-    # Inicializa as seleções na tabela
     for time in pd.concat([df_grupo['team_a'], df_grupo['team_b']]).unique():
         tabela[time] = {'Pts': 0, 'J': 0, 'V': 0, 'E': 0, 'D': 0, 'GP': 0, 'GC': 0, 'SG': 0}
 
-    # Calcula os pontos jogo a jogo
     for _, row in df_grupo.iterrows():
         ta, tb = row['team_a'], row['team_b']
         ra, rb = row['real_a'], row['real_b']
@@ -227,14 +224,12 @@ def calcular_classificacao_grupo(df_grupo):
                 tabela[ta]['E'] += 1
                 tabela[tb]['E'] += 1
 
-    # Calcula Saldo de Gols e organiza DataFrame
     for time in tabela:
         tabela[time]['SG'] = tabela[time]['GP'] - tabela[time]['GC']
 
     df_tab = pd.DataFrame.from_dict(tabela, orient='index').reset_index()
     df_tab = df_tab.rename(columns={'index': 'Seleção'})
     
-    # Ordenação padrão FIFA: Pontos > Saldo de Gols > Gols Pró
     df_tab = df_tab.sort_values(by=['Pts', 'SG', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
     df_tab.index = df_tab.index + 1
     return df_tab
@@ -255,7 +250,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     ]
 )
 
-# --- ABA 1: FORMULÁRIO DE PALPITES (COM RESULTADOS LADO A LADO) ---
+# --- ABA 1: FORMULÁRIO DE PALPITES ---
 with aba1:
     agora = pd.Timestamp.now(tz="America/Sao_Paulo")
     
@@ -295,10 +290,8 @@ with aba1:
                     with st.expander(f"Jogos do Grupo {grupo}", expanded=False):
                         jogos_do_grupo = df_oficiais[df_oficiais['grupo'] == grupo]
                         
-                        # --- DIVISÃO EM COLUNAS ---
                         col_palpites, col_info = st.columns([1.5, 1], gap="large")
                         
-                        # LADO ESQUERDO: O FORMULÁRIO DE PALPITES
                         with col_palpites:
                             for index, row in jogos_do_grupo.iterrows():
                                 g_id = row['game_id']
@@ -328,11 +321,9 @@ with aba1:
                                 st.write("")
                                 st.divider()
                                 
-                        # LADO DIREITO: TABELA DO GRUPO E RESULTADOS REAIS
                         with col_info:
                             st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
                             df_classificacao = calcular_classificacao_grupo(jogos_do_grupo)
-                            # Mostra as colunas essenciais: Seleção, Pontos, Jogos, Saldo de Gols
                             st.dataframe(df_classificacao[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
                             
                             st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
@@ -371,7 +362,7 @@ with aba1:
                         st.cache_data.clear()
                         st.success(f"Palpites de {nome_participante} salvos com sucesso! Boa sorte no bolão! 🍀")
 
-# --- ABA 2: RANKING E DASHBOARD ---
+# --- ABA 2: RANKING E DASHBOARD DINÂMICO ---
 with aba2:
     st.header("Ranking Atualizado")
 
@@ -402,23 +393,35 @@ with aba2:
             ascending=[False, False, False]
         ).reset_index(drop=True)
         df_ranking.index = df_ranking.index + 1
-
-        col_m1, col_m2, col_m3 = st.columns(3)
         
-        if len(df_ranking) > 0:
-            col_m1.metric("🥇 1º Colocado", df_ranking.iloc[0]['nome'], f"{int(df_ranking.iloc[0]['total_pontos'])} pts", delta_color="off")
+        # --- LÓGICA DE PREMIAÇÃO DINÂMICA ---
+        num_participantes = len(df_ranking)
+        total_arrecadado = num_participantes * 100
+        
+        if num_participantes <= 30:
+            distribuicao = [("🥇 1º Lugar", 0.60), ("🥈 2º Lugar", 0.25), ("🥉 3º Lugar", 0.15)]
+        elif num_participantes <= 40:
+            distribuicao = [("🥇 1º Lugar", 0.50), ("🥈 2º Lugar", 0.25), ("🥉 3º Lugar", 0.15), ("🏅 4º Lugar", 0.10)]
+        elif num_participantes <= 50:
+            distribuicao = [("🥇 1º Lugar", 0.45), ("🥈 2º Lugar", 0.22), ("🥉 3º Lugar", 0.15), ("🏅 4º Lugar", 0.10), ("🏅 5º Lugar", 0.08)]
         else:
-            col_m1.metric("🥇 1º Colocado", "-", "-")
+            distribuicao = [("🥇 1º Lugar", 0.40), ("🥈 2º Lugar", 0.20), ("🥉 3º Lugar", 0.15), ("🏅 4º Lugar", 0.10), ("🏅 5º Lugar", 0.08), ("🏅 6º Lugar", 0.07)]
+
+        st.info(f"**💰 Pote Atual Estimado: R$ {total_arrecadado:,.2f}** ({num_participantes} participantes na disputa)".replace(",", "X").replace(".", ",").replace("X", "."))
+        
+        # Cria colunas proporcionais para exibir a premiação
+        cols_premio = st.columns(len(distribuicao))
+        for i, (posicao, percentual) in enumerate(distribuicao):
+            valor_premio = total_arrecadado * percentual
+            cols_premio[i].metric(posicao, f"R$ {valor_premio:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
             
-        if len(df_ranking) > 1:
-            col_m2.metric("🥈 2º Colocado", df_ranking.iloc[1]['nome'], f"{int(df_ranking.iloc[1]['total_pontos'])} pts", delta_color="off")
-        else:
-            col_m2.metric("🥈 2º Colocado", "-", "-")
-            
-        if len(df_ranking) > 2:
-            col_m3.metric("🥉 3º Colocado", df_ranking.iloc[2]['nome'], f"{int(df_ranking.iloc[2]['total_pontos'])} pts", delta_color="off")
-        else:
-            col_m3.metric("🥉 3º Colocado", "-", "-")
+        st.divider()
+
+        # Renderiza os Top 3 destaques (visuais)
+        col_m1, col_m2, col_m3 = st.columns(3)
+        if len(df_ranking) > 0: col_m1.metric("🥇 1º Colocado", df_ranking.iloc[0]['nome'], f"{int(df_ranking.iloc[0]['total_pontos'])} pts", delta_color="off")
+        if len(df_ranking) > 1: col_m2.metric("🥈 2º Colocado", df_ranking.iloc[1]['nome'], f"{int(df_ranking.iloc[1]['total_pontos'])} pts", delta_color="off")
+        if len(df_ranking) > 2: col_m3.metric("🥉 3º Colocado", df_ranking.iloc[2]['nome'], f"{int(df_ranking.iloc[2]['total_pontos'])} pts", delta_color="off")
 
         st.dataframe(
             df_ranking[['nome', 'total_pontos', 'placares_exatos', 'gols_vencedor']].rename(
@@ -475,7 +478,7 @@ with aba2:
             
             st.pyplot(fig)
 
-# --- ABA 3: REGRAS ---
+# --- ABA 3: REGRAS PROGRESSIVAS ---
 with aba3:
     st.header("📜 Regras do Bolão DIRCO 2026")
 
@@ -519,16 +522,35 @@ Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
 
 ---
 
-## 5. Premiação
+## 5. Premiação Dinâmica
 
-### 🥇 Primeiro Lugar
-**60% da arrecadação**
+A distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:
 
-### 🥈 Segundo Lugar
-**30% da arrecadação**
+**Até 30 Participantes:**
+* 1º lugar: 60%
+* 2º lugar: 25%
+* 3º lugar: 15%
 
-### 🥉 Terceiro Lugar
-**10% da arrecadação**
+**De 31 a 40 Participantes:**
+* 1º lugar: 50%
+* 2º lugar: 25%
+* 3º lugar: 15%
+* 4º lugar: 10%
+
+**De 41 a 50 Participantes:**
+* 1º lugar: 45%
+* 2º lugar: 22%
+* 3º lugar: 15%
+* 4º lugar: 10%
+* 5º lugar: 8%
+
+**Acima de 50 Participantes:**
+* 1º lugar: 40%
+* 2º lugar: 20%
+* 3º lugar: 15%
+* 4º lugar: 10%
+* 5º lugar: 8%
+* 6º lugar: 7%
 
 ---
 
@@ -627,7 +649,7 @@ with aba4:
         st.error("Senha incorreta.")
         
 # ==========================================
-# ABA 5 - CONSULTAR MEUS PALPITES (COM RESULTADOS LADO A LADO)
+# ABA 5 - CONSULTAR MEUS PALPITES
 # ==========================================
 with aba5:
     st.header("🔎 Consultar Meus Palpites")
@@ -666,8 +688,6 @@ with aba5:
 
                     for grupo in grupos:
                         with st.expander(f"Grupo {grupo}", expanded=False):
-                            
-                            # DIVISÃO EM COLUNAS TAMBÉM NA CONSULTA!
                             col_meus, col_reais = st.columns([1.5, 1], gap="large")
                             
                             jogos_grupo = df_exibicao[df_exibicao["grupo"] == grupo]
@@ -695,7 +715,6 @@ with aba5:
                                         st.markdown(f"<div style='text-align: center; font-size: 14px;'>{row['team_a']} <b>{int(ra)} x {int(rb)}</b> {row['team_b']}</div>", unsafe_allow_html=True)
                                     else:
                                         st.markdown(f"<div style='text-align: center; font-size: 14px; color: gray;'>{row['team_a']} - x - {row['team_b']}</div>", unsafe_allow_html=True)
-                                
 
                     st.divider()
                     st.subheader("📋 Resumo Completo")
