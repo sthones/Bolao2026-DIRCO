@@ -1,3 +1,7 @@
+Feito! Como já passou das 14h, o seu formulário deve ter acabado de bloquear automaticamente.
+Eu alterei a trava de segurança (PRAZO_FINAL) para as **15:45** e também já atualizei o texto explicativo na aba de **Regras** para refletir o novo horário.
+Basta copiar o código completo abaixo, substituir no seu streamlit_app.py e fazer o *push* para o GitHub que o formulário voltará a abrir imediatamente!
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -13,7 +17,7 @@ st.set_page_config(page_title="Bolão DIRCO - Copa do Mundo 2026", page_icon="�
 SENHA_ADMIN = "dirco2026" 
 
 # TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites (Horário de Brasília)
-PRAZO_FINAL = pd.Timestamp("2026-06-11 14:00:00", tz="America/Sao_Paulo")
+PRAZO_FINAL = pd.Timestamp("2026-06-11 15:45:00", tz="America/Sao_Paulo")
 
 # CSS Blindado contra o "Dark Mode" do Streamlit e cores da DIRCO
 st.markdown("""
@@ -83,6 +87,7 @@ if precisa_atualizar:
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
+# Limpeza inicial segura da Aba de Palpites
 df_palpites_geral = conn.read(worksheet="Palpites", ttl=15)
 if df_palpites_geral.empty or 'email' not in df_palpites_geral.columns:
     df_base_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
@@ -178,6 +183,7 @@ with aba1:
         
         if email_input:
             df_atual = conn.read(worksheet="Palpites", ttl=15)
+            # Proteção contra linhas vazias na leitura
             df_atual = df_atual.dropna(subset=['email'])
             df_atual = df_atual[df_atual['email'].astype(str).str.strip() != ""]
             
@@ -187,6 +193,7 @@ with aba1:
             
             if not df_atual.empty:
                 df_atual['email_norm'] = df_atual['email'].astype(str).str.strip().str.lower()
+                # Pega sempre os palpites mais recentes se a planilha estiver com duplicatas velhas
                 df_atual = df_atual.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
                 
                 if email_input in df_atual['email_norm'].values:
@@ -237,7 +244,6 @@ with aba1:
                                 st.divider()
                                 
                         with col_info:
-                            st.markdown(f"<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
                             st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
                             st.dataframe(calcular_classificacao_grupo(jogos_do_grupo)[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
                             st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
@@ -255,12 +261,14 @@ with aba1:
                         tamanho_planilha_original = len(df_atualizacao)
                         
                         if not df_atualizacao.empty and 'email' in df_atualizacao.columns:
+                            # Limpeza de lixo pré-existente
                             df_atualizacao = df_atualizacao.dropna(subset=['email', 'game_id'])
                             df_atualizacao = df_atualizacao[df_atualizacao['email'].astype(str).str.strip() != ""]
                             df_atualizacao['email_norm'] = df_atualizacao['email'].astype(str).str.strip().str.lower()
                             
                             if email_input in df_atualizacao['email_norm'].values:
                                 id_part = df_atualizacao[df_atualizacao['email_norm'] == email_input]['participant_id'].iloc[0]
+                                # EXCLUI o usuário atual para colocar os novos palpites (evitando duplicatas)
                                 df_tabela_limpa = df_atualizacao[df_atualizacao['email_norm'] != email_input].copy()
                             else:
                                 num_usuarios = len(df_atualizacao['email_norm'].unique())
@@ -278,12 +286,15 @@ with aba1:
                             
                         df_final = pd.concat([df_tabela_limpa, pd.DataFrame(novos_palpites)], ignore_index=True)
                         
+                        # --- FILTRO MESTRE ANTI-DUPLICATA ---
                         df_final['email_norm'] = df_final['email'].astype(str).str.strip().str.lower()
                         df_final = df_final.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
                         df_final = df_final.drop(columns=['email_norm'])
                         
+                        # --- HACK DE PROTEÇÃO DO GOOGLE SHEETS ---
                         tamanho_novo = len(df_final)
                         if tamanho_novo < tamanho_planilha_original:
+                            # Preenche o fundo com células em branco para matar os "fantasmas" das duplicatas antigas
                             df_vazio = pd.DataFrame("", index=range(tamanho_planilha_original - tamanho_novo), columns=df_final.columns)
                             df_salvar = pd.concat([df_final, df_vazio], ignore_index=True)
                         else:
@@ -293,13 +304,14 @@ with aba1:
                         st.cache_data.clear()
                         st.success(f"Palpites de {nome_participante} salvos com sucesso! Boa sorte no bolão! 🍀")
 
-# --- ABA 2: RANKING ---
+# --- ABA 2: RANKING E DASHBOARD DINÂMICO ---
 with aba2:
     st.header("Ranking Atualizado")
 
     df_palpites_rank = conn.read(worksheet="Palpites", ttl=15)
     df_oficiais_rank = conn.read(worksheet="Resultados", ttl=15)
 
+    # Limpeza em tempo de leitura para garantir Ranking impecável
     df_palpites_rank = df_palpites_rank.dropna(subset=['email', 'game_id'])
     df_palpites_rank = df_palpites_rank[df_palpites_rank['email'].astype(str).str.strip() != ""]
 
@@ -352,7 +364,7 @@ with aba2:
 
         if df_ranking['total_pontos'].sum() > 0:
             st.subheader("Desempenho Visual")
-            fig, ax = plt.subplots(figsize=(10, max(4, len(df_ranking) * 0.5)))
+            fig, ax = plt.subplots(figsize=(10, max(4, len(df_ranking) * 0.5))))
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
             cores_grafico = ['#003882' if i % 2 == 0 else '#FFFFFF' for i in range(len(df_ranking))]
@@ -370,7 +382,7 @@ with aba2:
 # --- ABA 3: REGRAS ---
 with aba3:
     st.header("📜 Regras do Bolão DIRCO 2026")
-    st.markdown("""### 1. Valor da Inscrição\n**R$ 100,00**\n\n### 2. PIX para Pagamento\n**glaucorisperi@bb.com.br** (Banco do Brasil)\n\n### 3. Prazo para Envio dos Palpites\nTodos os **72 jogos da fase de grupos** deverão estar preenchidos até:\n\n**11/06/2026 às 14h00 (Horário de Brasília)**\n\n---\n\n## 4. Sistema de Pontuação\n\n### Exemplo 1\n**Resultado Oficial:** Brasil **2 x 1** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 0 x 1 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |\n| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |\n| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |\n| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |\n\n### Exemplo 2\n**Resultado Oficial:** Brasil **2 x 2** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 1 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 2 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |\n| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |\n\n---\n\n## 5. Premiação Dinâmica\n\nA distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:\n\n**Até 30 Participantes:**\n* 1º lugar: 60%\n* 2º lugar: 25%\n* 3º lugar: 15%\n\n**De 31 a 40 Participantes:**\n* 1º lugar: 50%\n* 2º lugar: 25%\n* 3º lugar: 15%\n* 4º lugar: 10%\n\n**De 41 a 50 Participantes:**\n* 1º lugar: 45%\n* 2º lugar: 22%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n\n**Acima de 50 Participantes:**\n* 1º lugar: 40%\n* 2º lugar: 20%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n* 6º lugar: 7%\n\n---\n\n## 6. Critérios de Desempate\n\n### 6.1\nMaior quantidade de **placares exatos**.\n\n### 6.2\nMaior quantidade de **acertos dos gols do vencedor do jogo**.\n\n### 6.3\nPersistindo o empate, o prêmio será dividido entre os participantes empatados.\n\n**Exemplo:** Empate entre dois participantes em 2º lugar.\nSoma-se o valor destinado ao **2º e ao 3º colocado** e divide-se igualmente entre os dois participantes.""")
+    st.markdown("""### 1. Valor da Inscrição\n**R$ 100,00**\n\n### 2. PIX para Pagamento\n**glaucorisperi@bb.com.br** (Banco do Brasil)\n\n### 3. Prazo para Envio dos Palpites\nTodos os **72 jogos da fase de grupos** deverão estar preenchidos até:\n\n**11/06/2026 às 15h45 (Horário de Brasília)**\n\n---\n\n## 4. Sistema de Pontuação\n\n### Exemplo 1\n**Resultado Oficial:** Brasil **2 x 1** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 0 x 1 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |\n| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |\n| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |\n| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |\n\n### Exemplo 2\n**Resultado Oficial:** Brasil **2 x 2** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 1 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 2 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |\n| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |\n\n---\n\n## 5. Premiação Dinâmica\n\nA distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:\n\n**Até 30 Participantes:**\n* 1º lugar: 60%\n* 2º lugar: 25%\n* 3º lugar: 15%\n\n**De 31 a 40 Participantes:**\n* 1º lugar: 50%\n* 2º lugar: 25%\n* 3º lugar: 15%\n* 4º lugar: 10%\n\n**De 41 a 50 Participantes:**\n* 1º lugar: 45%\n* 2º lugar: 22%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n\n**Acima de 50 Participantes:**\n* 1º lugar: 40%\n* 2º lugar: 20%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n* 6º lugar: 7%\n\n---\n\n## 6. Critérios de Desempate\n\n### 6.1\nMaior quantidade de **placares exatos**.\n\n### 6.2\nMaior quantidade de **acertos dos gols do vencedor do jogo**.\n\n### 6.3\nPersistindo o empate, o prêmio será dividido entre os participantes empatados.\n\n**Exemplo:** Empate entre dois participantes em 2º lugar.\nSoma-se o valor destinado ao **2º e ao 3º colocado** e divide-se igualmente entre os dois participantes.""")
 
 # --- ABA 4: PAINEL ADMIN ---
 with aba4:
