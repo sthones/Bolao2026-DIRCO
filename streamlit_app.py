@@ -240,6 +240,7 @@ with aba1:
                                 st.divider()
                                 
                         with col_info:
+                            st.markdown(f"<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
                             st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
                             st.dataframe(calcular_classificacao_grupo(jogos_do_grupo)[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
                             st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
@@ -360,7 +361,8 @@ with aba2:
 
         if df_ranking['total_pontos'].sum() > 0:
             st.subheader("Desempenho Visual")
-            fig, ax = plt.subplots(figsize=(10, max(4, len(df_ranking) * 0.5))))
+            # CORREÇÃO APLICADA AQUI: Retirado o parêntese extra no final
+            fig, ax = plt.subplots(figsize=(10, max(4, len(df_ranking) * 0.5)))
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
             cores_grafico = ['#003882' if i % 2 == 0 else '#FFFFFF' for i in range(len(df_ranking))]
