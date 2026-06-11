@@ -65,7 +65,6 @@ def carregar_jogos_iniciais():
         ano, mes, dia = data.split('-')
         data_formatada = f"{dia}/{mes}/{ano}"
         
-        # Puxa o nome em português baseado no ID do CSV
         nome_a = times_list[int(t_a)-1]
         nome_b = times_list[int(t_b)-1]
         
@@ -75,10 +74,9 @@ def carregar_jogos_iniciais():
 # ==========================================
 # MOTOR DA API DE FUTEBOL (TEMPO REAL CACHEADO)
 # ==========================================
-@st.cache_data(ttl=900) # Mantém o resultado na memória por 15 minutos (Max 96 requisições/dia)
+@st.cache_data(ttl=900) 
 def buscar_placares_api(df_jogos_oficiais):
     url = "https://v3.football.api-sports.io/fixtures"
-    # O ID da Copa do Mundo na API-Football é 1
     querystring = {"league": "1", "season": "2026"}
     headers = {
         "x-apisports-key": API_KEY
@@ -93,22 +91,18 @@ def buscar_placares_api(df_jogos_oficiais):
             partidas_api = dados["response"]
             
             for partida in partidas_api:
-                # Extrai os nomes em inglês vindos da API
                 time_a_eng = partida["teams"]["home"]["name"]
                 time_b_eng = partida["teams"]["away"]["name"]
                 
                 gols_a = partida["goals"]["home"]
                 gols_b = partida["goals"]["away"]
                 
-                # Traduz de volta para o nosso Português
                 time_a_pt = reverso_api.get(time_a_eng, time_a_eng)
                 time_b_pt = reverso_api.get(time_b_eng, time_b_eng)
                 
                 status = partida["fixture"]["status"]["short"]
                 
-                # Atualiza os gols se a partida já começou (1H, 2H, HT) ou terminou (FT, PEN)
                 if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
-                    # Encontra o jogo correspondente na nossa tabela
                     idx = df_atualizado.index[(df_atualizado['team_a'] == time_a_pt) & (df_atualizado['team_b'] == time_b_pt)].tolist()
                     if idx:
                         df_atualizado.at[idx[0], 'real_a'] = int(gols_a)
@@ -116,7 +110,6 @@ def buscar_placares_api(df_jogos_oficiais):
                         
             return df_atualizado
     except Exception as e:
-        # Se a API falhar (cair a net, etc), retorna o DataFrame original sem quebrar o app
         pass
         
     return df_jogos_oficiais
@@ -136,7 +129,7 @@ if precisa_atualizar:
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
-# GATILHO DO TEMPO REAL: Toda vez que o app carrega, tenta buscar os dados novos da API
+# GATILHO DO TEMPO REAL
 df_oficiais = buscar_placares_api(df_oficiais)
 
 df_palpites_geral = conn.read(worksheet="Palpites", ttl=15)
@@ -411,7 +404,6 @@ with aba2:
     st.header("Ranking Atualizado (Sincronizado ao Vivo 📡)")
 
     df_palpites_rank = conn.read(worksheet="Palpites", ttl=15)
-    # df_oficiais já foi atualizado com a API no topo do script!
     df_oficiais_rank = df_oficiais
 
     df_palpites_rank = df_palpites_rank.dropna(subset=['email', 'game_id'])
@@ -494,6 +486,25 @@ with aba4:
     if senha_input == SENHA_ADMIN:
         st.success("Acesso Liberado! Sincronizado com o Google Sheets.")
         
+        # --- TESTE DA API ---
+        with st.expander("📡 Testar Conexão com a API (Modo Desenvolvedor)"):
+            if st.button("Buscar Status Bruto da API"):
+                url = "https://v3.football.api-sports.io/fixtures"
+                querystring = {"league": "1", "season": "2026"}
+                headers = {"x-apisports-key": API_KEY}
+                try:
+                    resposta = requests.request("GET", url, headers=headers, params=querystring)
+                    st.write("Código de Resposta:", resposta.status_code)
+                    if resposta.status_code == 200:
+                        dados = resposta.json()
+                        st.write(f"Requisições restantes hoje: {resposta.headers.get('x-ratelimit-remaining')}")
+                        st.json(dados)
+                    else:
+                        st.error("Falha na conexão com a API.")
+                except Exception as e:
+                    st.error(f"Erro ao tentar conectar: {e}")
+        st.divider()
+
         st.subheader("Atualizar Resultados Oficialmente no Banco (Opcional)")
         st.info("O sistema já puxa os dados ao vivo da API na aba Ranking. Mas se você quiser CHUMBAR um resultado definitivo na planilha, edite aqui e salve.")
         
