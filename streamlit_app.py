@@ -1,7 +1,3 @@
-Feito! Como já passou das 14h, o seu formulário deve ter acabado de bloquear automaticamente.
-Eu alterei a trava de segurança (PRAZO_FINAL) para as **15:45** e também já atualizei o texto explicativo na aba de **Regras** para refletir o novo horário.
-Basta copiar o código completo abaixo, substituir no seu streamlit_app.py e fazer o *push* para o GitHub que o formulário voltará a abrir imediatamente!
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
