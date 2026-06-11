@@ -13,7 +13,8 @@ st.set_page_config(page_title="Bolão DIRCO - Copa do Mundo 2026", page_icon="�
 SENHA_ADMIN = "dirco2026" 
 
 # TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites (Horário de Brasília)
-PRAZO_FINAL = pd.Timestamp("2026-06-11 11:59:00", tz="America/Sao_Paulo")
+# ALTERADO: Fechamento esticado para 11/06/2026 às 14:00
+PRAZO_FINAL = pd.Timestamp("2026-06-11 14:00:00", tz="America/Sao_Paulo")
 
 # CSS Blindado contra o "Dark Mode" do Streamlit e cores da DIRCO
 st.markdown("""
@@ -409,7 +410,6 @@ with aba2:
 
         st.info(f"**💰 Pote Atual Estimado: R$ {total_arrecadado:,.2f}** ({num_participantes} participantes na disputa)".replace(",", "X").replace(".", ",").replace("X", "."))
         
-        # Cria colunas proporcionais para exibir a premiação
         cols_premio = st.columns(len(distribuicao))
         for i, (posicao, percentual) in enumerate(distribuicao):
             valor_premio = total_arrecadado * percentual
@@ -417,7 +417,6 @@ with aba2:
             
         st.divider()
 
-        # Renderiza os Top 3 destaques (visuais)
         col_m1, col_m2, col_m3 = st.columns(3)
         if len(df_ranking) > 0: col_m1.metric("🥇 1º Colocado", df_ranking.iloc[0]['nome'], f"{int(df_ranking.iloc[0]['total_pontos'])} pts", delta_color="off")
         if len(df_ranking) > 1: col_m2.metric("🥈 2º Colocado", df_ranking.iloc[1]['nome'], f"{int(df_ranking.iloc[1]['total_pontos'])} pts", delta_color="off")
@@ -492,7 +491,7 @@ with aba3:
 ### 3. Prazo para Envio dos Palpites
 Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
 
-**11/06/2026 às 11h59 (Horário de Brasília)**
+**11/06/2026 às 14h00 (Horário de Brasília)**
 
 ---
 
