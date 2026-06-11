@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import requests
+from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
@@ -11,60 +13,113 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="Bolão DIRCO - Copa do Mundo 2026", page_icon="🏆", layout="wide")
 
 SENHA_ADMIN = "dirco2026" 
+API_KEY = "08c35382bdaf4a812b2025b1e6266551"
 
-# TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites (Horário de Brasília)
+# TRAVA DE SEGURANÇA: Data e hora máxima para aceitar palpites
 PRAZO_FINAL = pd.Timestamp("2026-06-11 15:45:00", tz="America/Sao_Paulo")
 
-# CSS Blindado contra o "Dark Mode" do Streamlit e cores da DIRCO
 st.markdown("""
     <style>
-    /* Fundo Amarelo Principal do App */
     .stApp, .main { background-color: #FFDF00 !important; }
-    /* Textos gerais em Azul Escuro */
     .stApp, p, span, div, label, h1, h2, h3, h4, h5, h6, li { color: #003882 !important; }
-    /* ABAS DE NAVEGAÇÃO (TABS) */
     button[data-baseweb="tab"] { background-color: transparent !important; }
     button[data-baseweb="tab"] > div[data-testid="stMarkdownContainer"] > p { color: #003882 !important; font-weight: 800 !important; font-size: 18px !important; }
     button[data-baseweb="tab"][aria-selected="true"] { border-bottom: 4px solid #003882 !important; }
-    /* BOTÕES */
     .stButton>button, .stButton>button p { background-color: #003882 !important; color: #FFDF00 !important; font-weight: 900 !important; border: none !important; border-radius: 6px; transition: all 0.3s ease; }
     .stButton>button:hover, .stButton>button:hover p { background-color: #FFFFFF !important; color: #003882 !important; border: 2px solid #003882 !important; }
-    /* Expander (Sanfona dos Grupos) */
     .streamlit-expanderHeader { background-color: #F8CB00 !important; color: #003882 !important; font-weight: bold; border-radius: 5px; }
-    /* Caixas de input com fundo branco para contraste */
     .stTextInput>div>div>input, .stNumberInput>div>div>input { background-color: #FFFFFF !important; color: #003882 !important; border: 1px solid #003882 !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. CARGA DE DADOS
+# 1. CARGA DE DADOS E DICIONÁRIOS
 # ==========================================
+# Tradutor para a API em Inglês
+tradutor_api = {
+    "México": "Mexico", "África do Sul": "South Africa", "Coreia do Sul": "South Korea", "República Tcheca": "Czech Republic",
+    "Canadá": "Canada", "Bósnia e Herzegovina": "Bosnia", "Catar": "Qatar", "Suíça": "Switzerland",
+    "Brasil": "Brazil", "Marrocos": "Morocco", "Haiti": "Haiti", "Escócia": "Scotland",
+    "Estados Unidos": "USA", "Paraguai": "Paraguay", "Austrália": "Australia", "Turquia": "Turkey",
+    "Alemanha": "Germany", "Curaçao": "Curacao", "Costa do Marfim": "Ivory Coast", "Equador": "Ecuador",
+    "Holanda": "Netherlands", "Japão": "Japan", "Suécia": "Sweden", "Tunísia": "Tunisia",
+    "Bélgica": "Belgium", "Egito": "Egypt", "Irã": "Iran", "Nova Zelândia": "New Zealand",
+    "Espanha": "Spain", "Cabo Verde": "Cape Verde", "Arábia Saudita": "Saudi Arabia", "Uruguai": "Uruguay",
+    "França": "France", "Senegal": "Senegal", "Iraque": "Iraq", "Noruega": "Norway",
+    "Argentina": "Argentina", "Argélia": "Algeria", "Áustria": "Austria", "Jordânia": "Jordan",
+    "Portugal": "Portugal", "República Democrática do Congo": "DR Congo", "Uzbequistão": "Uzbekistan", "Colômbia": "Colombia",
+    "Inglaterra": "England", "Croácia": "Croatia", "Gana": "Ghana", "Panamá": "Panama"
+}
+reverso_api = {v: k for k, v in tradutor_api.items()}
+
 def carregar_jogos_iniciais():
-    times = {
-        1: "México", 2: "África do Sul", 3: "Coreia do Sul", 4: "República Tcheca",
-        5: "Canadá", 6: "Bósnia e Herzegovina", 7: "Catar", 8: "Suíça",
-        9: "Brasil", 10: "Marrocos", 11: "Haiti", 12: "Escócia",
-        13: "Estados Unidos", 14: "Paraguai", 15: "Austrália", 16: "Turquia",
-        17: "Alemanha", 18: "Curaçao", 19: "Costa do Marfim", 20: "Equador",
-        21: "Holanda", 22: "Japão", 23: "Suécia", 24: "Tunísia",
-        25: "Bélgica", 26: "Egito", 27: "Irã", 28: "Nova Zelândia",
-        29: "Espanha", 30: "Cabo Verde", 31: "Arábia Saudita", 32: "Uruguai",
-        33: "França", 34: "Senegal", 35: "Iraque", 36: "Noruega",
-        37: "Argentina", 38: "Argélia", 39: "Áustria", 40: "Jordânia",
-        41: "Portugal", 42: "República Democrática do Congo", 43: "Uzbequistão", 44: "Colômbia",
-        45: "Inglaterra", 46: "Croácia", 47: "Gana", 48: "Panamá"
-    }
+    times = {k: k_nome for k_nome, v_nome in tradutor_api.items() for k, k_nome in enumerate(tradutor_api.keys(), 1)}
     cidades = {1: "Atlanta", 2: "Boston", 3: "Dallas", 4: "Houston", 5: "Kansas City", 6: "Los Angeles", 7: "Miami", 8: "Nova York/Nova Jersey", 9: "Filadélfia", 10: "São Francisco", 11: "Seattle", 12: "Toronto", 13: "Vancouver", 14: "Guadalajara", 15: "Cidade do México", 16: "Monterrey"}
     jogos_csv = """1,1,2,15,2026-06-11,A\n2,3,4,14,2026-06-11,A\n3,5,6,12,2026-06-12,B\n4,13,14,6,2026-06-12,D\n5,7,8,10,2026-06-13,B\n6,9,10,8,2026-06-13,C\n7,11,12,2,2026-06-13,C\n8,15,16,13,2026-06-14,D\n9,17,18,4,2026-06-14,E\n10,21,22,3,2026-06-14,F\n11,19,20,9,2026-06-14,E\n12,23,24,16,2026-06-14,F\n13,29,30,1,2026-06-15,H\n14,25,26,11,2026-06-15,G\n15,31,32,7,2026-06-15,H\n16,27,28,6,2026-06-15,G\n17,33,34,8,2026-06-16,I\n18,35,36,2,2026-06-16,I\n19,37,38,5,2026-06-16,J\n20,39,40,10,2026-06-17,J\n21,41,42,4,2026-06-17,K\n22,45,46,3,2026-06-17,L\n23,47,48,12,2026-06-17,L\n24,43,44,15,2026-06-17,K\n25,4,2,1,2026-06-18,A\n26,8,6,6,2026-06-18,B\n27,5,7,13,2026-06-18,B\n28,1,3,14,2026-06-18,A\n29,13,15,11,2026-06-19,D\n30,12,10,2,2026-06-19,C\n31,9,11,9,2026-06-19,C\n32,16,14,10,2026-06-20,D\n33,21,23,4,2026-06-20,F\n34,17,19,12,2026-06-20,E\n35,20,18,5,2026-06-20,E\n36,24,22,16,2026-06-21,F\n37,29,31,1,2026-06-21,H\n38,25,27,6,2026-06-21,G\n39,32,30,7,2026-06-21,H\n40,28,26,13,2026-06-21,G\n41,37,39,3,2026-06-22,J\n42,33,35,9,2026-06-22,I\n43,36,34,8,2026-06-22,I\n44,40,38,10,2026-06-22,J\n45,41,43,4,2026-06-23,K\n46,45,47,2,2026-06-23,L\n47,48,46,12,2026-06-23,L\n48,44,42,14,2026-06-23,K\n49,8,5,13,2026-06-24,B\n50,6,7,11,2026-06-24,B\n51,12,9,7,2026-06-24,C\n52,10,11,1,2026-06-24,C\n53,4,1,15,2026-06-24,A\n54,2,3,16,2026-06-24,A\n55,18,19,9,2026-06-25,E\n56,20,17,8,2026-06-25,E\n57,22,23,3,2026-06-25,F\n58,24,21,5,2026-06-25,F\n59,16,13,6,2026-06-25,D\n60,14,15,10,2026-06-25,D\n61,36,33,2,2026-06-26,I\n62,34,35,12,2026-06-26,I\n63,30,31,4,2026-06-26,H\n64,32,29,14,2026-06-26,H\n65,26,27,11,2026-06-26,G\n66,28,25,13,2026-06-26,G\n67,48,45,8,2026-06-27,L\n68,46,47,9,2026-06-27,L\n69,44,41,7,2026-06-27,K\n70,42,43,1,2026-06-27,K\n71,38,39,5,2026-06-27,J\n72,40,37,3,2026-06-27,J"""
 
     world_cup_games = []
+    times_list = list(tradutor_api.keys())
     for linha in jogos_csv.split('\n'):
         if not linha.strip(): continue
         g_id, t_a, t_b, c_id, data, grupo = linha.split(',')
         ano, mes, dia = data.split('-')
         data_formatada = f"{dia}/{mes}/{ano}"
-        world_cup_games.append({"game_id": f"WC26_G{int(g_id):03d}", "data": data_formatada, "local": cidades[int(c_id)], "grupo": grupo, "team_a": times[int(t_a)], "team_b": times[int(t_b)], "real_a": np.nan, "real_b": np.nan})
+        
+        # Puxa o nome em português baseado no ID do CSV
+        nome_a = times_list[int(t_a)-1]
+        nome_b = times_list[int(t_b)-1]
+        
+        world_cup_games.append({"game_id": f"WC26_G{int(g_id):03d}", "data": data_formatada, "local": cidades[int(c_id)], "grupo": grupo, "team_a": nome_a, "team_b": nome_b, "real_a": np.nan, "real_b": np.nan})
     return pd.DataFrame(world_cup_games)
+
+# ==========================================
+# MOTOR DA API DE FUTEBOL (TEMPO REAL CACHEADO)
+# ==========================================
+@st.cache_data(ttl=900) # Mantém o resultado na memória por 15 minutos (Max 96 requisições/dia)
+def buscar_placares_api(df_jogos_oficiais):
+    url = "https://v3.football.api-sports.io/fixtures"
+    # O ID da Copa do Mundo na API-Football é 1
+    querystring = {"league": "1", "season": "2026"}
+    headers = {
+        "x-apisports-key": API_KEY
+    }
+    
+    try:
+        response = requests.request("GET", url, headers=headers, params=querystring, timeout=10)
+        dados = response.json()
+        
+        if dados.get("results", 0) > 0:
+            df_atualizado = df_jogos_oficiais.copy()
+            partidas_api = dados["response"]
+            
+            for partida in partidas_api:
+                # Extrai os nomes em inglês vindos da API
+                time_a_eng = partida["teams"]["home"]["name"]
+                time_b_eng = partida["teams"]["away"]["name"]
+                
+                gols_a = partida["goals"]["home"]
+                gols_b = partida["goals"]["away"]
+                
+                # Traduz de volta para o nosso Português
+                time_a_pt = reverso_api.get(time_a_eng, time_a_eng)
+                time_b_pt = reverso_api.get(time_b_eng, time_b_eng)
+                
+                status = partida["fixture"]["status"]["short"]
+                
+                # Atualiza os gols se a partida já começou (1H, 2H, HT) ou terminou (FT, PEN)
+                if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
+                    # Encontra o jogo correspondente na nossa tabela
+                    idx = df_atualizado.index[(df_atualizado['team_a'] == time_a_pt) & (df_atualizado['team_b'] == time_b_pt)].tolist()
+                    if idx:
+                        df_atualizado.at[idx[0], 'real_a'] = int(gols_a)
+                        df_atualizado.at[idx[0], 'real_b'] = int(gols_b)
+                        
+            return df_atualizado
+    except Exception as e:
+        # Se a API falhar (cair a net, etc), retorna o DataFrame original sem quebrar o app
+        pass
+        
+    return df_jogos_oficiais
 
 # ==========================================
 # 2. CONEXÃO COM GOOGLE SHEETS E CACHE
@@ -75,15 +130,15 @@ df_oficiais = conn.read(worksheet="Resultados", ttl=15)
 precisa_atualizar = False
 if df_oficiais.empty or 'data' not in df_oficiais.columns:
     precisa_atualizar = True
-elif df_oficiais['team_a'].astype(str).str.contains('Rep\. UEFA|Rep\. FIFA|RD Congo', regex=True).any():
-    precisa_atualizar = True
 
 if precisa_atualizar:
     df_base_jogos = carregar_jogos_iniciais()
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
-# Limpeza inicial segura da Aba de Palpites
+# GATILHO DO TEMPO REAL: Toda vez que o app carrega, tenta buscar os dados novos da API
+df_oficiais = buscar_placares_api(df_oficiais)
+
 df_palpites_geral = conn.read(worksheet="Palpites", ttl=15)
 if df_palpites_geral.empty or 'email' not in df_palpites_geral.columns:
     df_base_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
@@ -154,6 +209,53 @@ def calcular_classificacao_grupo(df_grupo):
     df_tab.index = df_tab.index + 1
     return df_tab
 
+def calcular_classificacao_palpites_usuario(df_grupo, palpites_existentes):
+    tabela = {}
+    for time in pd.concat([df_grupo['team_a'], df_grupo['team_b']]).unique():
+        tabela[time] = {'Pts': 0, 'J': 0, 'V': 0, 'E': 0, 'D': 0, 'GP': 0, 'GC': 0, 'SG': 0}
+
+    for _, row in df_grupo.iterrows():
+        ta, tb = row['team_a'], row['team_b']
+        g_id = row['game_id']
+
+        if f"a_{g_id}" in st.session_state and f"b_{g_id}" in st.session_state:
+            pa = st.session_state[f"a_{g_id}"]
+            pb = st.session_state[f"b_{g_id}"]
+        else:
+            pa = palpites_existentes.get(g_id, {}).get('pred_a', 0)
+            pb = palpites_existentes.get(g_id, {}).get('pred_b', 0)
+
+        pa, pb = int(pa), int(pb)
+        tabela[ta]['J'] += 1
+        tabela[tb]['J'] += 1
+        tabela[ta]['GP'] += pa
+        tabela[tb]['GP'] += pb
+        tabela[ta]['GC'] += pb
+        tabela[tb]['GC'] += pa
+
+        if pa > pb:
+            tabela[ta]['Pts'] += 3
+            tabela[ta]['V'] += 1
+            tabela[tb]['D'] += 1
+        elif pa < pb:
+            tabela[tb]['Pts'] += 3
+            tabela[tb]['V'] += 1
+            tabela[ta]['D'] += 1
+        else:
+            tabela[ta]['Pts'] += 1
+            tabela[tb]['Pts'] += 1
+            tabela[ta]['E'] += 1
+            tabela[tb]['E'] += 1
+
+    for time in tabela:
+        tabela[time]['SG'] = tabela[time]['GP'] - tabela[time]['GC']
+
+    df_tab = pd.DataFrame.from_dict(tabela, orient='index').reset_index()
+    df_tab = df_tab.rename(columns={'index': 'Seleção'})
+    df_tab = df_tab.sort_values(by=['Pts', 'SG', 'GP'], ascending=[False, False, False]).reset_index(drop=True)
+    df_tab.index = df_tab.index + 1
+    return df_tab
+
 # ==========================================
 # 4. INTERFACE DO STREAMLIT
 # ==========================================
@@ -179,7 +281,6 @@ with aba1:
         
         if email_input:
             df_atual = conn.read(worksheet="Palpites", ttl=15)
-            # Proteção contra linhas vazias na leitura
             df_atual = df_atual.dropna(subset=['email'])
             df_atual = df_atual[df_atual['email'].astype(str).str.strip() != ""]
             
@@ -189,7 +290,6 @@ with aba1:
             
             if not df_atual.empty:
                 df_atual['email_norm'] = df_atual['email'].astype(str).str.strip().str.lower()
-                # Pega sempre os palpites mais recentes se a planilha estiver com duplicatas velhas
                 df_atual = df_atual.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
                 
                 if email_input in df_atual['email_norm'].values:
@@ -241,15 +341,25 @@ with aba1:
                                 
                         with col_info:
                             st.markdown(f"<div style='margin-bottom:10px;'></div>", unsafe_allow_html=True)
-                            st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Classificação Oficial - Grupo {grupo}</h6>", unsafe_allow_html=True)
-                            st.dataframe(calcular_classificacao_grupo(jogos_do_grupo)[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
+                            st.markdown(f"<h6 style='text-align: center; color:#003882;'>📊 Tabela dos Seus Palpites - Grupo {grupo}</h6>", unsafe_allow_html=True)
+                            
+                            df_class_simulada = calcular_classificacao_palpites_usuario(jogos_do_grupo, palpites_existentes)
+                            st.dataframe(df_class_simulada[['Seleção', 'Pts', 'J', 'SG']], use_container_width=True, hide_index=True)
+                            
                             st.markdown("<h6 style='text-align: center; color:#003882; margin-top: 15px;'>⚽ Resultados Oficiais</h6>", unsafe_allow_html=True)
                             for _, row in jogos_do_grupo.iterrows():
                                 ra, rb = row['real_a'], row['real_b']
                                 if pd.notna(ra) and pd.notna(rb) and str(ra).strip() != "": st.markdown(f"<div style='text-align: center; font-size: 14px;'>{row['team_a']} <b>{int(ra)} x {int(rb)}</b> {row['team_b']}</div>", unsafe_allow_html=True)
                                 else: st.markdown(f"<div style='text-align: center; font-size: 14px; color: gray;'>{row['team_a']} - x - {row['team_b']}</div>", unsafe_allow_html=True)
 
-                submit = st.form_submit_button("⚽ Salvar Palpites")
+                st.info("💡 **Dica:** Preencha os placares e clique no botão **Atualizar Tabelas** para ver como a classificação de cada grupo vai ficar com os seus palpites. Quando estiver satisfeito, clique em **Salvar Palpites**.")
+                
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    st.form_submit_button("🔄 Atualizar Tabelas (Testar)")
+                with col_b2:
+                    submit = st.form_submit_button("⚽ Salvar Palpites em Definitivo")
+
                 if submit:
                     if nome_participante.strip() == "":
                         st.error("Por favor, preencha o seu nome antes de salvar.")
@@ -258,14 +368,12 @@ with aba1:
                         tamanho_planilha_original = len(df_atualizacao)
                         
                         if not df_atualizacao.empty and 'email' in df_atualizacao.columns:
-                            # Limpeza de lixo pré-existente
                             df_atualizacao = df_atualizacao.dropna(subset=['email', 'game_id'])
                             df_atualizacao = df_atualizacao[df_atualizacao['email'].astype(str).str.strip() != ""]
                             df_atualizacao['email_norm'] = df_atualizacao['email'].astype(str).str.strip().str.lower()
                             
                             if email_input in df_atualizacao['email_norm'].values:
                                 id_part = df_atualizacao[df_atualizacao['email_norm'] == email_input]['participant_id'].iloc[0]
-                                # EXCLUI o usuário atual para colocar os novos palpites (evitando duplicatas)
                                 df_tabela_limpa = df_atualizacao[df_atualizacao['email_norm'] != email_input].copy()
                             else:
                                 num_usuarios = len(df_atualizacao['email_norm'].unique())
@@ -283,15 +391,12 @@ with aba1:
                             
                         df_final = pd.concat([df_tabela_limpa, pd.DataFrame(novos_palpites)], ignore_index=True)
                         
-                        # --- FILTRO MESTRE ANTI-DUPLICATA ---
                         df_final['email_norm'] = df_final['email'].astype(str).str.strip().str.lower()
                         df_final = df_final.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
                         df_final = df_final.drop(columns=['email_norm'])
                         
-                        # --- HACK DE PROTEÇÃO DO GOOGLE SHEETS ---
                         tamanho_novo = len(df_final)
                         if tamanho_novo < tamanho_planilha_original:
-                            # Preenche o fundo com células em branco para matar os "fantasmas" das duplicatas antigas
                             df_vazio = pd.DataFrame("", index=range(tamanho_planilha_original - tamanho_novo), columns=df_final.columns)
                             df_salvar = pd.concat([df_final, df_vazio], ignore_index=True)
                         else:
@@ -303,12 +408,12 @@ with aba1:
 
 # --- ABA 2: RANKING E DASHBOARD DINÂMICO ---
 with aba2:
-    st.header("Ranking Atualizado")
+    st.header("Ranking Atualizado (Sincronizado ao Vivo 📡)")
 
     df_palpites_rank = conn.read(worksheet="Palpites", ttl=15)
-    df_oficiais_rank = conn.read(worksheet="Resultados", ttl=15)
+    # df_oficiais já foi atualizado com a API no topo do script!
+    df_oficiais_rank = df_oficiais
 
-    # Limpeza em tempo de leitura para garantir Ranking impecável
     df_palpites_rank = df_palpites_rank.dropna(subset=['email', 'game_id'])
     df_palpites_rank = df_palpites_rank[df_palpites_rank['email'].astype(str).str.strip() != ""]
 
@@ -361,7 +466,6 @@ with aba2:
 
         if df_ranking['total_pontos'].sum() > 0:
             st.subheader("Desempenho Visual")
-            # CORREÇÃO APLICADA AQUI: Retirado o parêntese extra no final
             fig, ax = plt.subplots(figsize=(10, max(4, len(df_ranking) * 0.5)))
             fig.patch.set_alpha(0.0)
             ax.patch.set_alpha(0.0)
@@ -380,7 +484,7 @@ with aba2:
 # --- ABA 3: REGRAS ---
 with aba3:
     st.header("📜 Regras do Bolão DIRCO 2026")
-    st.markdown("""### 1. Valor da Inscrição\n**R$ 100,00**\n\n### 2. PIX para Pagamento\n**glaucorisperi@bb.com.br** (Banco do Brasil)\n\n### 3. Prazo para Envio dos Palpites\nTodos os **72 jogos da fase de grupos** deverão estar preenchidos até:\n\n**11/06/2026 às 15h45 (Horário de Brasília)**\n\n---\n\n## 4. Sistema de Pontuação\n\n### Exemplo 1\n**Resultado Oficial:** Brasil **2 x 1** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 0 x 1 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |\n| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |\n| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |\n| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |\n\n### Exemplo 2\n**Resultado Oficial:** Brasil **2 x 2** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 1 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 2 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |\n| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |\n\n---\n\n## 5. Premiação Dinâmica\n\nA distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:\n\n**Até 30 Participantes:**\n* 1º lugar: 60%\n* 2º lugar: 25%\n* 3º lugar: 15%\n\n**De 31 a 40 Participantes:**\n* 1º lugar: 50%\n* 2º lugar: 25%\n* 3º lugar: 15%\n* 4º lugar: 10%\n\n**De 41 a 50 Participantes:**\n* 1º lugar: 45%\n* 2º lugar: 22%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n\n**Acima de 50 Participantes:**\n* 1º lugar: 40%\n* 2º lugar: 20%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n* 6º lugar: 7%\n\n---\n\n## 6. Critérios de Desempate\n\n### 6.1\nMaior quantidade de **placares exatos**.\n\n### 6.2\nMaior quantidade de **acertos dos gols do vencedor do jogo**.\n\n### 6.3\nPersistindo o empate, o prêmio será dividido entre os participantes empatados.\n\n**Exemplo:** Empate entre dois participantes em 2º lugar.\nSoma-se o valor destinado ao **2º e ao 3º colocado** e divide-se igualmente entre os dois participantes.""")
+    st.markdown("""### 1. Valor da Inscrição\n**R$ 100,00**\n\n### 2. PIX para Pagamento\n**glaucorisperi@bb.com.br** (Banco do Brasil)\n\n### 3. Prazo para Envio dos Palpites\nTodos os **72 jogos da fase de grupos** deverão estar preenchidos até:\n\n**11/06/2026 às 15h45 (Horário de Brasília)**\n\n---\n\n## 4. Sistema de Pontuação\n\n### Exemplo 1\n**Resultado Oficial:** Brasil **2 x 1** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 0 x 1 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |\n| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |\n| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |\n| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |\n\n### Exemplo 2\n**Resultado Oficial:** Brasil **2 x 2** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 1 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 2 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |\n| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |\n\n---\n\n## 5. Premiação Dinâmica\n\nA distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:\n\n**Até 30 Participantes:**\n* 1º lugar: 60%\n* 2º lugar: 25%\n* 3º lugar: 15%\n\n**De 31 a 40 Participantes:**\n* 1º lugar: 50%\n* 2º lugar: 25%\n* 3º lugar: 15%\n* 4º lugar: 10%\n\n**De 41 a 50 Participantes:**\n* 1º lugar: 45%\n* 2º lugar: 22%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n\n**Acima de 50 Participantes:**\n* 1º lugar: 40%\n* 2º lugar: 20%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n* 6º lugar: 7%\n\n---\n\n## 6. Critérios de Desempate\n\n### 6.1\nMaior quantidade de **placares exatos**.\n\n### 6.2\nMaior quantidade de **acertos dos gols do vencedor do jogo**.\n\n### 6.3\nPersistindo o empate, o prêmio será dividido entre os participantes empatados.""")
 
 # --- ABA 4: PAINEL ADMIN ---
 with aba4:
@@ -390,7 +494,9 @@ with aba4:
     if senha_input == SENHA_ADMIN:
         st.success("Acesso Liberado! Sincronizado com o Google Sheets.")
         
-        st.subheader("Atualizar Resultados dos Jogos")
+        st.subheader("Atualizar Resultados Oficialmente no Banco (Opcional)")
+        st.info("O sistema já puxa os dados ao vivo da API na aba Ranking. Mas se você quiser CHUMBAR um resultado definitivo na planilha, edite aqui e salve.")
+        
         df_admin = conn.read(worksheet="Resultados", ttl=15)
         df_atualizado = st.data_editor(df_admin, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B", min_value=0, step=1)}, hide_index=True, use_container_width=True)
         
@@ -401,7 +507,7 @@ with aba4:
             st.rerun() 
             
         st.write("") 
-        if st.button("🔄 Atualizar App e Ranking (Forçar Leitura)"):
+        if st.button("🔄 Limpar Cache e Forçar Atualização Geral"):
             st.cache_data.clear()
             st.rerun()
             
@@ -524,7 +630,7 @@ with aba6:
     st.info("Brinque com os placares dos jogos para ver como ficaria a classificação geral! **As alterações feitas aqui não afetam o ranking oficial.**")
 
     df_palpites_sim = conn.read(worksheet="Palpites", ttl=15)
-    df_oficiais_sim = conn.read(worksheet="Resultados", ttl=15)
+    df_oficiais_sim = df_oficiais
     df_palpites_sim = df_palpites_sim.dropna(subset=['email', 'game_id'])
     df_palpites_sim = df_palpites_sim[df_palpites_sim['email'].astype(str).str.strip() != ""]
 
