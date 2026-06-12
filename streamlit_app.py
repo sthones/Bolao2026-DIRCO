@@ -46,7 +46,6 @@ tradutor_api = {
     "Inglaterra": "England", "Croácia": "Croatia", "Gana": "Ghana", "Panamá": "Panama"
 }
 
-# NOVA FUNÇÃO DE TRADUÇÃO RESISTENTE A VARIANTES DA API
 def traduzir_time_api(nome_api):
     nome_clean = str(nome_api).strip().lower()
     mapeamento = {
@@ -110,7 +109,7 @@ if df_oficiais.empty or 'data' not in df_oficiais.columns:
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
-# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL CORRIGIDA (IMUNE A INVERSÃO DE ORDENS)
+# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL
 dados_json = extrair_dados_api()
 houve_gol = False
 
@@ -126,7 +125,6 @@ if dados_json and dados_json.get("results", 0) > 0:
         time_b_pt = traduzir_time_api(time_b_eng)
         
         if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
-            # NOVO FILTRO ORDEM-AGNOSTICO: Localiza o jogo idependente de quem está listado como mandante
             idx = df_oficiais.index[
                 ((df_oficiais['team_a'] == time_a_pt) & (df_oficiais['team_b'] == time_b_pt)) |
                 ((df_oficiais['team_a'] == time_b_pt) & (df_oficiais['team_b'] == time_a_pt))
@@ -134,7 +132,6 @@ if dados_json and dados_json.get("results", 0) > 0:
             
             if idx:
                 i = idx[0]
-                # Determina qual placar vai para qual coluna baseado na sua planilha original
                 if df_oficiais.at[i, 'team_a'] == time_a_pt:
                     gols_time_a = int(gols_a)
                     gols_time_b = int(gols_b)
@@ -154,14 +151,8 @@ if houve_gol:
     conn.update(worksheet="Resultados", data=df_oficiais)
     st.cache_data.clear()
 
-df_palpites_geral = conn.read(worksheet="Palpites", ttl=15)
-if df_palpites_geral.empty or 'email' not in df_palpites_geral.columns:
-    df_base_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
-    conn.update(worksheet="Palpites", data=df_base_palpites)
-    df_palpites_geral = df_base_palpites
-
 # ==========================================
-# 3. SISTEMA DE PONTUAÇÃO E CLASSIFICAÇÃO
+# 3. SISTEMA DE PONTUAÇÃO E CLASSIFICAÇÃO (FUNÇÕES)
 # ==========================================
 def calculate_score(row):
     pred_a, pred_b = row['pred_a'], row['pred_b']
@@ -221,7 +212,46 @@ def calcular_classificacao_grupo(df_grupo):
     return df_tab
 
 # ==========================================
-# 4. INTERFACE DO STREAMLIT
+# 4. PROCESSAMENTO GLOBAL DE RANKING E PALPITES
+# ==========================================
+df_palpites_geral = conn.read(worksheet="Palpites", ttl=15)
+if df_palpites_geral.empty or 'email' not in df_palpites_geral.columns:
+    df_base_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
+    conn.update(worksheet="Palpites", data=df_base_palpites)
+    df_palpites_geral = df_base_palpites
+else:
+    df_palpites_geral = df_palpites_geral.dropna(subset=['email', 'game_id'])
+    df_palpites_geral = df_palpites_geral[df_palpites_geral['email'].astype(str).str.strip() != ""]
+    df_palpites_geral['email_norm'] = df_palpites_geral['email'].astype(str).str.strip().str.lower()
+    df_palpites_geral = df_palpites_geral.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
+
+# CÁLCULO GERAL (Cruza todos os palpites com os resultados oficiais ao vivo)
+df_analise = pd.merge(df_palpites_geral, df_oficiais[['game_id', 'real_a', 'real_b']], on='game_id', how='left')
+if not df_analise.empty:
+    df_analise['real_a'] = pd.to_numeric(df_analise['real_a'], errors='coerce')
+    df_analise['real_b'] = pd.to_numeric(df_analise['real_b'], errors='coerce')
+    df_analise['pred_a'] = pd.to_numeric(df_analise['pred_a'], errors='coerce')
+    df_analise['pred_b'] = pd.to_numeric(df_analise['pred_b'], errors='coerce')
+    
+    df_analise['pontos'] = df_analise.apply(calculate_score, axis=1)
+    df_analise['acerto_vencedor'] = df_analise.apply(acerto_gols_vencedor, axis=1)
+
+    df_ranking = df_analise.groupby(['email_norm', 'nome']).agg(
+        total_pontos=('pontos', 'sum'), 
+        placares_exatos=('pontos', lambda x: (x == 10).sum()), 
+        gols_vencedor=('acerto_vencedor', 'sum')
+    ).reset_index()
+    df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos', 'gols_vencedor'], ascending=[False, False, False]).reset_index(drop=True)
+    df_ranking.index = df_ranking.index + 1
+    
+    # Dicionário prático para puxarmos o total de pontos de qualquer usuário rapidamente
+    mapa_pontos_totais = dict(zip(df_ranking['email_norm'], df_ranking['total_pontos']))
+else:
+    df_ranking = pd.DataFrame()
+    mapa_pontos_totais = {}
+
+# ==========================================
+# 5. INTERFACE DO STREAMLIT (ABAS)
 # ==========================================
 st.title("🏆 Bolão DIRCO - Copa do Mundo 2026")
 
@@ -232,20 +262,14 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
 # --- ABA 1: JOGOS DO DIA ---
 with aba1:
     st.header("🗓️ Palpites da Rodada")
-    st.info("A fase de envio de palpites foi encerrada! Acompanhe abaixo os jogos do dia e os palpites de todos os participantes de forma transparente.")
+    st.info("Acompanhe abaixo os jogos do dia. A tabela mostra os pontos que cada participante está fazendo nesta partida e a pontuação total dele no ranking!")
     
     datas_disponiveis = sorted(df_oficiais['data'].dropna().unique().tolist(), key=lambda x: pd.to_datetime(x, format='%d/%m/%Y'))
-    
     hoje_str = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m/%Y")
     idx_padrao = datas_disponiveis.index(hoje_str) if hoje_str in datas_disponiveis else 0
     
     data_selecionada = st.selectbox("Selecione a data dos jogos:", datas_disponiveis, index=idx_padrao)
     jogos_dia = df_oficiais[df_oficiais['data'] == data_selecionada]
-    
-    df_palpites_dia = conn.read(worksheet="Palpites", ttl=15)
-    df_palpites_dia = df_palpites_dia.dropna(subset=['email', 'game_id'])
-    df_palpites_dia['email_norm'] = df_palpites_dia['email'].astype(str).str.strip().str.lower()
-    df_palpites_dia = df_palpites_dia.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
     
     if jogos_dia.empty:
         st.warning("Não há jogos agendados para esta data.")
@@ -255,56 +279,56 @@ with aba1:
             
             ra = jogo['real_a']
             rb = jogo['real_b']
-            placar_of = f"{int(ra)} x {int(rb)}" if pd.notna(ra) and pd.notna(rb) else "Aguardando Início..."
+            jogo_iniciado = pd.notna(ra) and pd.notna(rb)
+            placar_of = f"{int(ra)} x {int(rb)}" if jogo_iniciado else "Aguardando Início..."
             
             st.markdown(f"**Grupo {jogo['grupo']}** &nbsp;|&nbsp; 📍 {jogo['local']} &nbsp;|&nbsp; **Placar Oficial:** `{placar_of}`")
-            palpites_do_jogo = df_palpites_dia[df_palpites_dia['game_id'] == jogo['game_id']]
             
-            if palpites_do_jogo.empty:
-                st.write("Nenhum palpite foi registrado para este jogo.")
+            # Puxa os dados globais calculados no início do código
+            if not df_analise.empty:
+                palpites_do_jogo = df_analise[df_analise['game_id'] == jogo['game_id']]
+                
+                if palpites_do_jogo.empty:
+                    st.write("Nenhum palpite foi registrado para este jogo.")
+                else:
+                    tabela_palpites = palpites_do_jogo[['nome', 'pred_a', 'pred_b', 'pontos', 'email_norm']].copy()
+                    tabela_palpites['pred_a'] = pd.to_numeric(tabela_palpites['pred_a'], downcast='integer')
+                    tabela_palpites['pred_b'] = pd.to_numeric(tabela_palpites['pred_b'], downcast='integer')
+                    
+                    # Traz os pontos totais mapeados
+                    tabela_palpites['Pontos Totais'] = tabela_palpites['email_norm'].map(mapa_pontos_totais).fillna(0).astype(int)
+                    
+                    # Lógica Visual: Se o jogo não começou, mostra "-", se rolar a bola, mostra os pontos do jogo
+                    if not jogo_iniciado:
+                        tabela_palpites['Pontos neste Jogo'] = "-"
+                        # Ordena apenas alfabeticamente se não começou
+                        tabela_palpites = tabela_palpites.sort_values(by=['Pontos Totais', 'nome'], ascending=[False, True])
+                    else:
+                        tabela_palpites['Pontos neste Jogo'] = tabela_palpites['pontos'].astype(int)
+                        # Ordena pelos que estão cravando o jogo no momento, seguido do ranking geral
+                        tabela_palpites = tabela_palpites.sort_values(by=['Pontos neste Jogo', 'Pontos Totais', 'nome'], ascending=[False, False, True])
+                    
+                    # Limpa as colunas finais para o visual
+                    tabela_palpites = tabela_palpites[['nome', 'pred_a', 'pred_b', 'Pontos neste Jogo', 'Pontos Totais']]
+                    tabela_palpites = tabela_palpites.rename(columns={
+                        'nome': 'Participante',
+                        'pred_a': f"Palpite {jogo['team_a']}",
+                        'pred_b': f"Palpite {jogo['team_b']}"
+                    })
+                    
+                    st.dataframe(tabela_palpites, use_container_width=True, hide_index=True)
             else:
-                tabela_palpites = palpites_do_jogo[['nome', 'pred_a', 'pred_b']].copy()
-                tabela_palpites['pred_a'] = pd.to_numeric(tabela_palpites['pred_a'], downcast='integer')
-                tabela_palpites['pred_b'] = pd.to_numeric(tabela_palpites['pred_b'], downcast='integer')
+                st.write("Banco de palpites vazio.")
                 
-                tabela_palpites = tabela_palpites.rename(columns={
-                    'nome': 'Participante',
-                    'pred_a': f"Palpite {jogo['team_a']}",
-                    'pred_b': f"Palpite {jogo['team_b']}"
-                }).sort_values(by='Participante')
-                
-                st.dataframe(tabela_palpites, use_container_width=True, hide_index=True)
             st.divider()
 
 # --- ABA 2: RANKING ---
 with aba2:
     st.header("Ranking Updated (Live Score 📡)")
 
-    df_palpites_rank = conn.read(worksheet="Palpites", ttl=15)
-    df_oficiais_rank = df_oficiais
-
-    df_palpites_rank = df_palpites_rank.dropna(subset=['email', 'game_id'])
-    df_palpites_rank = df_palpites_rank[df_palpites_rank['email'].astype(str).str.strip() != ""]
-
-    if df_palpites_rank.empty:
+    if df_ranking.empty:
         st.info("Nenhum palpite foi registrado no banco de dados ainda.")
     else:
-        df_palpites_rank['email'] = df_palpites_rank['email'].astype(str).str.strip().str.lower()
-        df_palpites_rank = df_palpites_rank.drop_duplicates(subset=['email', 'game_id'], keep='last')
-        
-        df_analise = pd.merge(df_palpites_rank, df_oficiais_rank[['game_id', 'real_a', 'real_b']], on='game_id', how='left')
-        df_analise['real_a'] = pd.to_numeric(df_analise['real_a'], errors='coerce')
-        df_analise['real_b'] = pd.to_numeric(df_analise['real_b'], errors='coerce')
-        df_analise['pred_a'] = pd.to_numeric(df_analise['pred_a'], errors='coerce')
-        df_analise['pred_b'] = pd.to_numeric(df_analise['pred_b'], errors='coerce')
-        
-        df_analise['pontos'] = df_analise.apply(calculate_score, axis=1)
-        df_analise['acerto_vencedor'] = df_analise.apply(acerto_gols_vencedor, axis=1)
-
-        df_ranking = df_analise.groupby(['email', 'nome']).agg(total_pontos=('pontos', 'sum'), placares_exatos=('pontos', lambda x: (x == 10).sum()), gols_vencedor=('acerto_vencedor', 'sum')).reset_index()
-        df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos', 'gols_vencedor'], ascending=[False, False, False]).reset_index(drop=True)
-        df_ranking.index = df_ranking.index + 1
-        
         num_participantes = len(df_ranking)
         total_arrecadado = num_participantes * 100
         
@@ -483,18 +507,16 @@ with aba4:
         st.divider()
         st.subheader("🗑️ Excluir Palpites de um Usuário")
         
-        df_palpites_admin = conn.read(worksheet="Palpites", ttl=15)
-        df_palpites_admin = df_palpites_admin.dropna(subset=['email'])
-        df_palpites_admin = df_palpites_admin[df_palpites_admin['email'].astype(str).str.strip() != ""]
-        
-        if not df_palpites_admin.empty:
-            usuarios_cadastrados = df_palpites_admin['email'].unique()
+        if not df_palpites_geral.empty:
+            usuarios_cadastrados = df_palpites_geral['email_norm'].unique()
             if len(usuarios_cadastrados) > 0:
                 usuario_para_excluir = st.selectbox("Selecione o e-mail do participante que deseja remover:", usuarios_cadastrados)
                 
                 if st.button("❌ Apagar Palpites Deste Usuário"):
-                    tamanho_original = len(df_palpites_admin)
-                    df_palpites_limpo = df_palpites_admin[df_palpites_admin['email'] != usuario_para_excluir]
+                    df_admin_palpites = conn.read(worksheet="Palpites", ttl=15)
+                    tamanho_original = len(df_admin_palpites)
+                    df_admin_palpites['email_teste'] = df_admin_palpites['email'].astype(str).str.strip().str.lower()
+                    df_palpites_limpo = df_admin_palpites[df_admin_palpites['email_teste'] != usuario_para_excluir].drop(columns=['email_teste'])
                     
                     tamanho_novo = len(df_palpites_limpo)
                     if tamanho_novo < tamanho_original:
@@ -514,7 +536,8 @@ with aba4:
         st.subheader("⚠️ Área de Perigo Total")
         
         if st.button("🚨 ZERAR O BOLÃO INTEIRO PARA ENTRAR EM PRODUÇÃO"):
-            tamanho_original = len(conn.read(worksheet="Palpites", ttl=15))
+            df_admin_palpites = conn.read(worksheet="Palpites", ttl=15)
+            tamanho_original = len(df_admin_palpites)
             df_zerado_palpites = pd.DataFrame(columns=["participant_id", "nome", "email", "game_id", "pred_a", "pred_b"])
             if tamanho_original > 0:
                 df_vazio = pd.DataFrame("", index=range(tamanho_original), columns=df_zerado_palpites.columns)
@@ -545,15 +568,9 @@ with aba5:
     if st.button("Buscar Meus Palpites"):
         if not email_consulta: st.warning("Informe um e-mail.")
         else:
-            df_palpites_consulta = conn.read(worksheet="Palpites", ttl=15)
-            df_palpites_consulta = df_palpites_consulta.dropna(subset=['email', 'game_id'])
-            df_palpites_consulta = df_palpites_consulta[df_palpites_consulta['email'].astype(str).str.strip() != ""]
-
-            if df_palpites_consulta.empty: st.error("Nenhum palpite cadastrado.")
+            if df_palpites_geral.empty: st.error("Nenhum palpite cadastrado.")
             else:
-                df_palpites_consulta['email_norm'] = df_palpites_consulta['email'].astype(str).str.strip().str.lower()
-                df_palpites_consulta = df_palpites_consulta.drop_duplicates(subset=['email_norm', 'game_id'], keep='last')
-                df_usuario = df_palpites_consulta[df_palpites_consulta['email_norm'] == email_consulta]
+                df_usuario = df_palpites_geral[df_palpites_geral['email_norm'] == email_consulta]
 
                 if len(df_usuario) == 0: st.error("Nenhum palpite encontrado para este e-mail.")
                 else:
@@ -598,23 +615,15 @@ with aba6:
     st.header("🔮 Simulador de Resultados")
     st.info("Brinque com os placares dos jogos para ver como ficaria a classificação geral! **As alterações feitas aqui não afetam o ranking oficial.**")
 
-    df_palpites_sim = conn.read(worksheet="Palpites", ttl=15)
-    df_oficiais_sim = df_oficiais
-    df_palpites_sim = df_palpites_sim.dropna(subset=['email', 'game_id'])
-    df_palpites_sim = df_palpites_sim[df_palpites_sim['email'].astype(str).str.strip() != ""]
-
-    if df_palpites_sim.empty: st.warning("Nenhum palpite registrado ainda para fazer simulações.")
+    if df_palpites_geral.empty: st.warning("Nenhum palpite registrado ainda para fazer simulações.")
     else:
-        df_palpites_sim['email'] = df_palpites_sim['email'].astype(str).str.strip().str.lower()
-        df_palpites_sim = df_palpites_sim.drop_duplicates(subset=['email', 'game_id'], keep='last')
-        
         st.subheader("1. Digite seus resultados hipotéticos")
-        df_simulacao = df_oficiais_sim.copy()
+        df_simulacao = df_oficiais.copy()
         df_editado = st.data_editor(df_simulacao, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A (Simulação)", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B (Simulação)", min_value=0, step=1)}, hide_index=True, use_container_width=True, key="simulador_editor")
 
         st.subheader("2. Veja como ficaria a tabela")
         if st.button("🚀 Calcular Ranking Simulado"):
-            df_analise_sim = pd.merge(df_palpites_sim, df_editado[['game_id', 'real_a', 'real_b']], on='game_id', how='left')
+            df_analise_sim = pd.merge(df_palpites_geral, df_editado[['game_id', 'real_a', 'real_b']], on='game_id', how='left')
             df_analise_sim['real_a'] = pd.to_numeric(df_analise_sim['real_a'], errors='coerce')
             df_analise_sim['real_b'] = pd.to_numeric(df_analise_sim['real_b'], errors='coerce')
             df_analise_sim['pred_a'] = pd.to_numeric(df_analise_sim['pred_a'], errors='coerce')
@@ -623,7 +632,7 @@ with aba6:
             df_analise_sim['pontos'] = df_analise_sim.apply(calculate_score, axis=1)
             df_analise_sim['acerto_vencedor'] = df_analise_sim.apply(acerto_gols_vencedor, axis=1)
 
-            df_ranking_sim = df_analise_sim.groupby(['email', 'nome']).agg(total_pontos=('pontos', 'sum'), placares_exatos=('pontos', lambda x: (x == 10).sum()), gols_vencedor=('acerto_vencedor', 'sum')).reset_index()
+            df_ranking_sim = df_analise_sim.groupby(['email_norm', 'nome']).agg(total_pontos=('pontos', 'sum'), placares_exatos=('pontos', lambda x: (x == 10).sum()), gols_vencedor=('acerto_vencedor', 'sum')).reset_index()
             df_ranking_sim = df_ranking_sim.sort_values(by=['total_pontos', 'placares_exatos', 'gols_vencedor'], ascending=[False, False, False]).reset_index(drop=True)
             df_ranking_sim.index = df_ranking_sim.index + 1
 
