@@ -109,7 +109,7 @@ if df_oficiais.empty or 'data' not in df_oficiais.columns:
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
-# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL
+# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL CORRIGIDA
 dados_json = extrair_dados_api()
 houve_gol = False
 
@@ -244,11 +244,13 @@ if not df_analise.empty:
     df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos', 'gols_vencedor'], ascending=[False, False, False]).reset_index(drop=True)
     df_ranking.index = df_ranking.index + 1
     
-    # Dicionário prático para puxarmos o total de pontos de qualquer usuário rapidamente
+    # Dicionários práticos para puxarmos o total de pontos e a posição no ranking geral rapidamente
     mapa_pontos_totais = dict(zip(df_ranking['email_norm'], df_ranking['total_pontos']))
+    mapa_posicoes = {email: f"{pos}º" for pos, email in zip(df_ranking.index, df_ranking['email_norm'])}
 else:
     df_ranking = pd.DataFrame()
     mapa_pontos_totais = {}
+    mapa_posicoes = {}
 
 # ==========================================
 # 5. INTERFACE DO STREAMLIT (ABAS)
@@ -262,7 +264,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
 # --- ABA 1: JOGOS DO DIA ---
 with aba1:
     st.header("🗓️ Palpites da Rodada")
-    st.info("Acompanhe abaixo os jogos do dia. A tabela mostra os pontos que cada participante está fazendo nesta partida e a pontuação total dele no ranking!")
+    st.info("Acompanhe abaixo os jogos do dia. A tabela mostra os pontos que cada participante está fazendo nesta partida e a posição e pontuação atual dele no Ranking Geral!")
     
     datas_disponiveis = sorted(df_oficiais['data'].dropna().unique().tolist(), key=lambda x: pd.to_datetime(x, format='%d/%m/%Y'))
     hoje_str = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m/%Y")
@@ -284,7 +286,6 @@ with aba1:
             
             st.markdown(f"**Grupo {jogo['grupo']}** &nbsp;|&nbsp; 📍 {jogo['local']} &nbsp;|&nbsp; **Placar Oficial:** `{placar_of}`")
             
-            # Puxa os dados globais calculados no início do código
             if not df_analise.empty:
                 palpites_do_jogo = df_analise[df_analise['game_id'] == jogo['game_id']]
                 
@@ -295,21 +296,22 @@ with aba1:
                     tabela_palpites['pred_a'] = pd.to_numeric(tabela_palpites['pred_a'], downcast='integer')
                     tabela_palpites['pred_b'] = pd.to_numeric(tabela_palpites['pred_b'], downcast='integer')
                     
-                    # Traz os pontos totais mapeados
+                    # Traz os pontos totais e a posição geral mapeados
                     tabela_palpites['Pontos Totais'] = tabela_palpites['email_norm'].map(mapa_pontos_totais).fillna(0).astype(int)
+                    tabela_palpites['Posição Geral'] = tabela_palpites['email_norm'].map(mapa_posicoes).fillna("-")
                     
                     # Lógica Visual: Se o jogo não começou, mostra "-", se rolar a bola, mostra os pontos do jogo
                     if not jogo_iniciado:
                         tabela_palpites['Pontos neste Jogo'] = "-"
-                        # Ordena apenas alfabeticamente se não começou
+                        # Ordena apenas pelo ranking geral (quem tem mais pontos totais fica em cima)
                         tabela_palpites = tabela_palpites.sort_values(by=['Pontos Totais', 'nome'], ascending=[False, True])
                     else:
                         tabela_palpites['Pontos neste Jogo'] = tabela_palpites['pontos'].astype(int)
                         # Ordena pelos que estão cravando o jogo no momento, seguido do ranking geral
                         tabela_palpites = tabela_palpites.sort_values(by=['Pontos neste Jogo', 'Pontos Totais', 'nome'], ascending=[False, False, True])
                     
-                    # Limpa as colunas finais para o visual
-                    tabela_palpites = tabela_palpites[['nome', 'pred_a', 'pred_b', 'Pontos neste Jogo', 'Pontos Totais']]
+                    # Reorganiza as colunas e renomeia para o layout final
+                    tabela_palpites = tabela_palpites[['Posição Geral', 'nome', 'pred_a', 'pred_b', 'Pontos neste Jogo', 'Pontos Totais']]
                     tabela_palpites = tabela_palpites.rename(columns={
                         'nome': 'Participante',
                         'pred_a': f"Palpite {jogo['team_a']}",
