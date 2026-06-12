@@ -45,7 +45,26 @@ tradutor_api = {
     "Portugal": "Portugal", "República Democrática do Congo": "DR Congo", "Uzbequistão": "Uzbekistan", "Colômbia": "Colombia",
     "Inglaterra": "England", "Croácia": "Croatia", "Gana": "Ghana", "Panamá": "Panama"
 }
-reverso_api = {v: k for k, v in tradutor_api.items()}
+
+# NOVA FUNÇÃO DE TRADUÇÃO RESISTENTE A VARIANTES DA API
+def traduzir_time_api(nome_api):
+    nome_clean = str(nome_api).strip().lower()
+    mapeamento = {
+        "mexico": "México", "south africa": "África do Sul", "south korea": "Coreia do Sul", "czech republic": "República Tcheca",
+        "canada": "Canadá", "bosnia": "Bósnia e Herzegovina", "bosnia & herzegovina": "Bósnia e Herzegovina", 
+        "bosnia and herzegovina": "Bósnia e Herzegovina", "qatar": "Catar", "switzerland": "Suíça",
+        "brazil": "Brasil", "morocco": "Marrocos", "haiti": "Haiti", "scotland": "Escócia",
+        "usa": "Estados Unidos", "united states": "Estados Unidos", "paraguay": "Paraguai", "australia": "Austrália", "turkey": "Turquia",
+        "germany": "Alemanha", "curacao": "Curaçao", "ivory coast": "Costa do Marfim", "ecuador": "Equador",
+        "netherlands": "Holanda", "japan": "Japão", "sweden": "Suécia", "tunisia": "Tunísia",
+        "belgium": "Bélgica", "egypt": "Egito", "iran": "Irã", "new zealand": "Nova Zelândia",
+        "spain": "Espanha", "cape verde": "Cabo Verde", "saudi arabia": "Arábia Saudita", "uruguay": "Uruguai",
+        "france": "França", "senegal": "Senegal", "iraq": "Iraque", "norway": "Noruega",
+        "argentina": "Argentina", "algeria": "Argélia", "austria": "Áustria", "jordan": "Jordânia",
+        "portugal": "Portugal", "dr congo": "República Democrática do Congo", "uzbekistan": "Uzbequistão", "colombia": "Colômbia",
+        "england": "Inglaterra", "croatia": "Croácia", "ghana": "Gana", "panama": "Panamá"
+    }
+    return mapeamento.get(nome_clean, nome_api)
 
 def carregar_jogos_iniciais():
     times_list = list(tradutor_api.keys())
@@ -67,7 +86,7 @@ def carregar_jogos_iniciais():
 # ==========================================
 # MOTOR DA API DE FUTEBOL (Sincronização Ativa)
 # ==========================================
-@st.cache_data(ttl=60) # Atualiza a cada minuto para bater com o live score
+@st.cache_data(ttl=60) 
 def extrair_dados_api():
     url = "https://v3.football.api-sports.io/fixtures"
     querystring = {"league": "1", "season": "2026"}
@@ -91,7 +110,7 @@ if df_oficiais.empty or 'data' not in df_oficiais.columns:
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
 
-# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL
+# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL CORRIGIDA (IMUNE A INVERSÃO DE ORDENS)
 dados_json = extrair_dados_api()
 houve_gol = False
 
@@ -103,20 +122,32 @@ if dados_json and dados_json.get("results", 0) > 0:
         gols_b = partida["goals"]["away"]
         status = partida["fixture"]["status"]["short"]
         
-        time_a_pt = reverso_api.get(time_a_eng, time_a_eng)
-        time_b_pt = reverso_api.get(time_b_eng, time_b_eng)
+        time_a_pt = traduzir_time_api(time_a_eng)
+        time_b_pt = traduzir_time_api(time_b_eng)
         
         if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
-            idx = df_oficiais.index[(df_oficiais['team_a'] == time_a_pt) & (df_oficiais['team_b'] == time_b_pt)].tolist()
+            # NOVO FILTRO ORDEM-AGNOSTICO: Localiza o jogo idependente de quem está listado como mandante
+            idx = df_oficiais.index[
+                ((df_oficiais['team_a'] == time_a_pt) & (df_oficiais['team_b'] == time_b_pt)) |
+                ((df_oficiais['team_a'] == time_b_pt) & (df_oficiais['team_b'] == time_a_pt))
+            ].tolist()
+            
             if idx:
                 i = idx[0]
+                # Determina qual placar vai para qual coluna baseado na sua planilha original
+                if df_oficiais.at[i, 'team_a'] == time_a_pt:
+                    gols_time_a = int(gols_a)
+                    gols_time_b = int(gols_b)
+                else:
+                    gols_time_a = int(gols_b)
+                    gols_time_b = int(gols_a)
+                
                 real_a_banco = df_oficiais.at[i, 'real_a']
                 real_b_banco = df_oficiais.at[i, 'real_b']
                 
-                # Só escreve no banco se o placar oficial de fato tiver mudado
-                if pd.isna(real_a_banco) or pd.isna(real_b_banco) or int(real_a_banco) != int(gols_a) or int(real_b_banco) != int(gols_b):
-                    df_oficiais.at[i, 'real_a'] = int(gols_a)
-                    df_oficiais.at[i, 'real_b'] = int(gols_b)
+                if pd.isna(real_a_banco) or pd.isna(real_b_banco) or int(real_a_banco) != gols_time_a or int(real_b_banco) != gols_time_b:
+                    df_oficiais.at[i, 'real_a'] = gols_time_a
+                    df_oficiais.at[i, 'real_b'] = gols_time_b
                     houve_gol = True
 
 if houve_gol:
@@ -198,20 +229,17 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     ["🗓️ Jogos do Dia", "📊 Ranking", "📜 Regras", "⚙️ Admin", "🔎 Consultar Meus Palpites", "🔮 Simulador"]
 )
 
-# --- ABA 1: JOGOS DO DIA (SUBSTITUI O ENVIO DE PALPITES) ---
+# --- ABA 1: JOGOS DO DIA ---
 with aba1:
     st.header("🗓️ Palpites da Rodada")
     st.info("A fase de envio de palpites foi encerrada! Acompanhe abaixo os jogos do dia e os palpites de todos os participantes de forma transparente.")
     
-    # Extrai datas únicas para o seletor
     datas_disponiveis = sorted(df_oficiais['data'].dropna().unique().tolist(), key=lambda x: pd.to_datetime(x, format='%d/%m/%Y'))
     
-    # Data de hoje para colocar como padrão no filtro
     hoje_str = pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m/%Y")
     idx_padrao = datas_disponiveis.index(hoje_str) if hoje_str in datas_disponiveis else 0
     
     data_selecionada = st.selectbox("Selecione a data dos jogos:", datas_disponiveis, index=idx_padrao)
-    
     jogos_dia = df_oficiais[df_oficiais['data'] == data_selecionada]
     
     df_palpites_dia = conn.read(worksheet="Palpites", ttl=15)
@@ -230,7 +258,6 @@ with aba1:
             placar_of = f"{int(ra)} x {int(rb)}" if pd.notna(ra) and pd.notna(rb) else "Aguardando Início..."
             
             st.markdown(f"**Grupo {jogo['grupo']}** &nbsp;|&nbsp; 📍 {jogo['local']} &nbsp;|&nbsp; **Placar Oficial:** `{placar_of}`")
-            
             palpites_do_jogo = df_palpites_dia[df_palpites_dia['game_id'] == jogo['game_id']]
             
             if palpites_do_jogo.empty:
@@ -249,9 +276,9 @@ with aba1:
                 st.dataframe(tabela_palpites, use_container_width=True, hide_index=True)
             st.divider()
 
-# --- ABA 2: RANKING E DASHBOARD DINÂMICO ---
+# --- ABA 2: RANKING ---
 with aba2:
-    st.header("Ranking Atualizado (Sincronizado ao Vivo 📡)")
+    st.header("Ranking Updated (Live Score 📡)")
 
     df_palpites_rank = conn.read(worksheet="Palpites", ttl=15)
     df_oficiais_rank = df_oficiais
@@ -326,7 +353,89 @@ with aba2:
 # --- ABA 3: REGRAS ---
 with aba3:
     st.header("📜 Regras do Bolão DIRCO 2026")
-    st.markdown("""### 1. Valor da Inscrição\n**R$ 100,00**\n\n### 2. PIX para Pagamento\n**glaucorisperi@bb.com.br** (Banco do Brasil)\n\n### 3. Prazo para Envio dos Palpites\nTodos os **72 jogos da fase de grupos** deverão estar preenchidos até:\n\n**11/06/2026 às 15h45 (Horário de Brasília)**\n\n---\n\n## 4. Sistema de Pontuação\n\n### Exemplo 1\n**Resultado Oficial:** Brasil **2 x 1** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 0 x 1 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |\n| Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |\n| Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |\n| Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |\n\n### Exemplo 2\n**Resultado Oficial:** Brasil **2 x 2** Marrocos\n\n| Palpite | Pontos | Critério |\n|----------|---------|----------|\n| Brasil 1 x 0 Marrocos | 0 | Errou resultado |\n| Brasil 1 x 2 Marrocos | 0 | Errou resultado |\n| Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |\n| Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |\n\n---\n\n## 5. Premiação Dinâmica\n\nA distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:\n\n**Até 30 Participantes:**\n* 1º lugar: 60%\n* 2º lugar: 25%\n* 3º lugar: 15%\n\n**De 31 a 40 Participantes:**\n* 1º lugar: 50%\n* 2º lugar: 25%\n* 3º lugar: 15%\n* 4º lugar: 10%\n\n**De 41 a 50 Participantes:**\n* 1º lugar: 45%\n* 2º lugar: 22%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n\n**Acima de 50 Participantes:**\n* 1º lugar: 40%\n* 2º lugar: 20%\n* 3º lugar: 15%\n* 4º lugar: 10%\n* 5º lugar: 8%\n* 6º lugar: 7%\n\n---\n\n## 6. Critérios de Desempate\n\n### 6.1\nMaior quantidade de **placares exatos**.\n\n### 6.2\nMaior quantidade de **acertos dos gols do vencedor do jogo**.\n\n### 6.3\nPersistindo o empate, o prêmio será dividido entre os participantes empatados.""")
+    st.markdown("""
+    ### 1. Valor da Inscrição
+    **R$ 100,00**
+
+    ### 2. PIX para Pagamento
+    **glaucorisperi@bb.com.br** (Banco do Brasil)
+
+    ### 3. Prazo para Envio dos Palpites
+    Todos os **72 jogos da fase de grupos** deverão estar preenchidos até:
+
+    **11/06/2026 às 15h45 (Horário de Brasília)**
+
+    ---
+
+    ## 4. Sistema de Pontuação
+
+    ### Exemplo 1
+    **Resultado Oficial:** Brasil **2 x 1** Marrocos
+
+    | Palpite | Pontos | Critério |
+    |----------|---------|----------|
+    | Brasil 0 x 1 Marrocos | 0 | Errou resultado |
+    | Brasil 0 x 0 Marrocos | 0 | Errou resultado |
+    | Brasil 1 x 0 Marrocos | 4 | Acerto somente do vencedor |
+    | Brasil 3 x 1 Marrocos | 5 | Acerto do vencedor + gols do perdedor |
+    | Brasil 2 x 0 Marrocos | 6 | Acerto do vencedor + gols do vencedor |
+    | Brasil 2 x 1 Marrocos | 10 | Acerto do placar exato |
+
+    ### Exemplo 2
+    **Resultado Oficial:** Brasil **2 x 2** Marrocos
+
+    | Palpite | Pontos | Critério |
+    |----------|---------|----------|
+    | Brasil 1 x 0 Marrocos | 0 | Errou resultado |
+    | Brasil 1 x 2 Marrocos | 0 | Errou resultado |
+    | Brasil 0 x 0 Marrocos | 5 | Acerto somente do empate |
+    | Brasil 2 x 2 Marrocos | 10 | Acerto do placar exato |
+
+    ---
+
+    ## 5. Premiação Dinâmica
+
+    A distribuição do prêmio total será definida de acordo com o número final de participantes inscritos:
+
+    **Até 30 Participantes:**
+    * 1º lugar: 60%
+    * 2º lugar: 25%
+    * 3º lugar: 15%
+
+    **De 31 a 40 Participantes:**
+    * 1º lugar: 50%
+    * 2º lugar: 25%
+    * 3º lugar: 15%
+    * 4º lugar: 10%
+
+    **De 41 a 50 Participantes:**
+    * 1º lugar: 45%
+    * 2º lugar: 22%
+    * 3º lugar: 15%
+    * 4º lugar: 10%
+    * 5º lugar: 8%
+
+    **Acima de 50 Participantes:**
+    * 1º lugar: 40%
+    * 2º lugar: 20%
+    * 3º lugar: 15%
+    * 4º lugar: 10%
+    * 5º lugar: 8%
+    * 6º lugar: 7%
+
+    ---
+
+    ## 6. Critérios de Desempate
+
+    ### 6.1
+    Maior quantidade de **placares exatos**.
+
+    ### 6.2
+    Maior quantidade de **acertos dos gols do vencedor do jogo**.
+
+    ### 6.3
+    Persistindo o empate, o prêmio será dividido entre os participantes empatados.
+    """)
 
 # --- ABA 4: PAINEL ADMIN ---
 with aba4:
@@ -336,7 +445,6 @@ with aba4:
     if senha_input == SENHA_ADMIN:
         st.success("Acesso Liberado! Sincronizado com o Google Sheets e API.")
         
-        # --- TESTE DA API ---
         with st.expander("📡 Testar Conexão com a API (Modo Desenvolvedor)"):
             if st.button("Buscar Status Bruto da API"):
                 url = "https://v3.football.api-sports.io/fixtures"
