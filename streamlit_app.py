@@ -48,19 +48,30 @@ tradutor_api = {
 
 def traduzir_time_api(nome_api):
     nome_clean = str(nome_api).strip().lower()
+    # Mapeamento expandido para blindar contra todas as variações oficiais da FIFA/API
     mapeamento = {
-        "mexico": "México", "south africa": "África do Sul", "south korea": "Coreia do Sul", "czech republic": "República Tcheca",
-        "canada": "Canadá", "bosnia": "Bósnia e Herzegovina", "bosnia & herzegovina": "Bósnia e Herzegovina", 
-        "bosnia and herzegovina": "Bósnia e Herzegovina", "qatar": "Catar", "switzerland": "Suíça",
-        "brazil": "Brasil", "morocco": "Marrocos", "haiti": "Haiti", "scotland": "Escócia",
-        "usa": "Estados Unidos", "united states": "Estados Unidos", "paraguay": "Paraguai", "australia": "Austrália", "turkey": "Turquia",
-        "germany": "Alemanha", "curacao": "Curaçao", "ivory coast": "Costa do Marfim", "ecuador": "Equador",
-        "netherlands": "Holanda", "japan": "Japão", "sweden": "Suécia", "tunisia": "Tunísia",
-        "belgium": "Bélgica", "egypt": "Egito", "iran": "Irã", "new zealand": "Nova Zelândia",
-        "spain": "Espanha", "cape verde": "Cabo Verde", "saudi arabia": "Arábia Saudita", "uruguay": "Uruguai",
+        "mexico": "México", "south africa": "África do Sul", 
+        "south korea": "Coreia do Sul", "korea republic": "Coreia do Sul", 
+        "czech republic": "República Tcheca", "czechia": "República Tcheca",
+        "canada": "Canadá", 
+        "bosnia": "Bósnia e Herzegovina", "bosnia & herzegovina": "Bósnia e Herzegovina", "bosnia and herzegovina": "Bósnia e Herzegovina", 
+        "qatar": "Catar", "switzerland": "Suíça", "brazil": "Brasil", "morocco": "Marrocos", "haiti": "Haiti", "scotland": "Escócia",
+        "usa": "Estados Unidos", "united states": "Estados Unidos", 
+        "paraguay": "Paraguai", "australia": "Austrália", 
+        "turkey": "Turquia", "türkiye": "Turquia", "turkiye": "Turquia",
+        "germany": "Alemanha", "curacao": "Curaçao", 
+        "ivory coast": "Costa do Marfim", "cote d'ivoire": "Costa do Marfim", "cote divoire": "Costa do Marfim",
+        "ecuador": "Equador", "netherlands": "Holanda", "japan": "Japão", "sweden": "Suécia", "tunisia": "Tunísia",
+        "belgium": "Bélgica", "egypt": "Egito", 
+        "iran": "Irã", "ir iran": "Irã", "islamic republic of iran": "Irã",
+        "new zealand": "Nova Zelândia", "spain": "Espanha", 
+        "cape verde": "Cabo Verde", "cabo verde": "Cabo Verde", 
+        "saudi arabia": "Arábia Saudita", "uruguay": "Uruguai",
         "france": "França", "senegal": "Senegal", "iraq": "Iraque", "norway": "Noruega",
         "argentina": "Argentina", "algeria": "Argélia", "austria": "Áustria", "jordan": "Jordânia",
-        "portugal": "Portugal", "dr congo": "República Democrática do Congo", "uzbekistan": "Uzbequistão", "colombia": "Colômbia",
+        "portugal": "Portugal", 
+        "dr congo": "República Democrática do Congo", "congo dr": "República Democrática do Congo", "democratic republic of the congo": "República Democrática do Congo",
+        "uzbekistan": "Uzbequistão", "colombia": "Colômbia",
         "england": "Inglaterra", "croatia": "Croácia", "ghana": "Gana", "panama": "Panamá"
     }
     return mapeamento.get(nome_clean, nome_api)
@@ -244,7 +255,6 @@ if not df_analise.empty:
     df_ranking = df_ranking.sort_values(by=['total_pontos', 'placares_exatos', 'gols_vencedor'], ascending=[False, False, False]).reset_index(drop=True)
     df_ranking.index = df_ranking.index + 1
     
-    # Dicionários práticos para puxarmos o total de pontos e a posição no ranking geral rapidamente
     mapa_pontos_totais = dict(zip(df_ranking['email_norm'], df_ranking['total_pontos']))
     mapa_posicoes = {email: f"{pos}º" for pos, email in zip(df_ranking.index, df_ranking['email_norm'])}
 else:
@@ -296,21 +306,16 @@ with aba1:
                     tabela_palpites['pred_a'] = pd.to_numeric(tabela_palpites['pred_a'], downcast='integer')
                     tabela_palpites['pred_b'] = pd.to_numeric(tabela_palpites['pred_b'], downcast='integer')
                     
-                    # Traz os pontos totais e a posição geral mapeados
                     tabela_palpites['Pontos Totais'] = tabela_palpites['email_norm'].map(mapa_pontos_totais).fillna(0).astype(int)
                     tabela_palpites['Posição Geral'] = tabela_palpites['email_norm'].map(mapa_posicoes).fillna("-")
                     
-                    # Lógica Visual: Se o jogo não começou, mostra "-", se rolar a bola, mostra os pontos do jogo
                     if not jogo_iniciado:
                         tabela_palpites['Pontos neste Jogo'] = "-"
-                        # Ordena apenas pelo ranking geral (quem tem mais pontos totais fica em cima)
                         tabela_palpites = tabela_palpites.sort_values(by=['Pontos Totais', 'nome'], ascending=[False, True])
                     else:
                         tabela_palpites['Pontos neste Jogo'] = tabela_palpites['pontos'].astype(int)
-                        # Ordena pelos que estão cravando o jogo no momento, seguido do ranking geral
                         tabela_palpites = tabela_palpites.sort_values(by=['Pontos neste Jogo', 'Pontos Totais', 'nome'], ascending=[False, False, True])
                     
-                    # Reorganiza as colunas e renomeia para o layout final
                     tabela_palpites = tabela_palpites[['Posição Geral', 'nome', 'pred_a', 'pred_b', 'Pontos neste Jogo', 'Pontos Totais']]
                     tabela_palpites = tabela_palpites.rename(columns={
                         'nome': 'Participante',
