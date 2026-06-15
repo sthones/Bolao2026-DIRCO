@@ -48,29 +48,29 @@ tradutor_api = {
 
 def traduzir_time_api(nome_api):
     nome_clean = str(nome_api).strip().lower()
-    # Mapeamento expandido para blindar contra todas as variações oficiais da FIFA/API
+    # Mapeamento BLINDADO contra todas as variações da FIFA/API
     mapeamento = {
         "mexico": "México", "south africa": "África do Sul", 
-        "south korea": "Coreia do Sul", "korea republic": "Coreia do Sul", 
+        "south korea": "Coreia do Sul", "korea republic": "Coreia do Sul", "republic of korea": "Coreia do Sul",
         "czech republic": "República Tcheca", "czechia": "República Tcheca",
         "canada": "Canadá", 
-        "bosnia": "Bósnia e Herzegovina", "bosnia & herzegovina": "Bósnia e Herzegovina", "bosnia and herzegovina": "Bósnia e Herzegovina", 
+        "bosnia": "Bósnia e Herzegovina", "bosnia & herzegovina": "Bósnia e Herzegovina", "bosnia and herzegovina": "Bósnia e Herzegovina", "bosnia-herzegovina": "Bósnia e Herzegovina",
         "qatar": "Catar", "switzerland": "Suíça", "brazil": "Brasil", "morocco": "Marrocos", "haiti": "Haiti", "scotland": "Escócia",
-        "usa": "Estados Unidos", "united states": "Estados Unidos", 
+        "usa": "Estados Unidos", "united states": "Estados Unidos", "united states of america": "Estados Unidos",
         "paraguay": "Paraguai", "australia": "Austrália", 
         "turkey": "Turquia", "türkiye": "Turquia", "turkiye": "Turquia",
-        "germany": "Alemanha", "curacao": "Curaçao", 
-        "ivory coast": "Costa do Marfim", "cote d'ivoire": "Costa do Marfim", "cote divoire": "Costa do Marfim",
+        "germany": "Alemanha", "curacao": "Curaçao", "curaçao": "Curaçao",
+        "ivory coast": "Costa do Marfim", "cote d'ivoire": "Costa do Marfim", "cote divoire": "Costa do Marfim", "côte d'ivoire": "Costa do Marfim",
         "ecuador": "Equador", "netherlands": "Holanda", "japan": "Japão", "sweden": "Suécia", "tunisia": "Tunísia",
         "belgium": "Bélgica", "egypt": "Egito", 
         "iran": "Irã", "ir iran": "Irã", "islamic republic of iran": "Irã",
         "new zealand": "Nova Zelândia", "spain": "Espanha", 
-        "cape verde": "Cabo Verde", "cabo verde": "Cabo Verde", 
+        "cape verde": "Cabo Verde", "cabo verde": "Cabo Verde", "cape verde islands": "Cabo Verde",
         "saudi arabia": "Arábia Saudita", "uruguay": "Uruguai",
         "france": "França", "senegal": "Senegal", "iraq": "Iraque", "norway": "Noruega",
         "argentina": "Argentina", "algeria": "Argélia", "austria": "Áustria", "jordan": "Jordânia",
         "portugal": "Portugal", 
-        "dr congo": "República Democrática do Congo", "congo dr": "República Democrática do Congo", "democratic republic of the congo": "República Democrática do Congo",
+        "dr congo": "República Democrática do Congo", "congo dr": "República Democrática do Congo", "democratic republic of the congo": "República Democrática do Congo", "congo democratic republic": "República Democrática do Congo",
         "uzbekistan": "Uzbequistão", "colombia": "Colômbia",
         "england": "Inglaterra", "croatia": "Croácia", "ghana": "Gana", "panama": "Panamá"
     }
