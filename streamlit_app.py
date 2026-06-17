@@ -48,7 +48,6 @@ tradutor_api = {
 
 def traduzir_time_api(nome_api):
     nome_clean = str(nome_api).strip().lower()
-    # Mapeamento BLINDADO contra todas as variações da FIFA/API
     mapeamento = {
         "mexico": "México", "south africa": "África do Sul", 
         "south korea": "Coreia do Sul", "korea republic": "Coreia do Sul", "republic of korea": "Coreia do Sul",
@@ -90,7 +89,7 @@ def carregar_jogos_iniciais():
         nome_a = times_list[int(t_a)-1]
         nome_b = times_list[int(t_b)-1]
         
-        world_cup_games.append({"game_id": f"WC26_G{int(g_id):03d}", "data": f"{dia}/{mes}/{ano}", "local": cidades[int(c_id)], "grupo": grupo, "team_a": nome_a, "team_b": nome_b, "real_a": np.nan, "real_b": np.nan})
+        world_cup_games.append({"game_id": f"WC26_G{int(g_id):03d}", "data": f"{dia}/{mes}/{ano}", "horario": "A definir", "local": cidades[int(c_id)], "grupo": grupo, "team_a": nome_a, "team_b": nome_b, "real_a": np.nan, "real_b": np.nan})
     return pd.DataFrame(world_cup_games)
 
 # ==========================================
@@ -115,14 +114,19 @@ def extrair_dados_api():
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 df_oficiais = conn.read(worksheet="Resultados", ttl=15) 
+precisa_atualizar = False
+
 if df_oficiais.empty or 'data' not in df_oficiais.columns:
     df_base_jogos = carregar_jogos_iniciais()
     conn.update(worksheet="Resultados", data=df_base_jogos)
     df_oficiais = df_base_jogos
+elif 'horario' not in df_oficiais.columns: # Garante que a coluna nova seja criada na planilha existente
+    df_oficiais.insert(2, 'horario', 'A definir')
+    precisa_atualizar = True
 
-# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL CORRIGIDA
+# AUTOSALVAMENTO E SINCRONIZAÇÃO EM TEMPO REAL
 dados_json = extrair_dados_api()
-houve_gol = False
+houve_mudanca = False
 
 if dados_json and dados_json.get("results", 0) > 0:
     for partida in dados_json["response"]:
@@ -131,18 +135,27 @@ if dados_json and dados_json.get("results", 0) > 0:
         gols_a = partida["goals"]["home"]
         gols_b = partida["goals"]["away"]
         status = partida["fixture"]["status"]["short"]
+        data_api = partida["fixture"]["date"]
         
         time_a_pt = traduzir_time_api(time_a_eng)
         time_b_pt = traduzir_time_api(time_b_eng)
         
-        if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
-            idx = df_oficiais.index[
-                ((df_oficiais['team_a'] == time_a_pt) & (df_oficiais['team_b'] == time_b_pt)) |
-                ((df_oficiais['team_a'] == time_b_pt) & (df_oficiais['team_b'] == time_a_pt))
-            ].tolist()
+        idx = df_oficiais.index[
+            ((df_oficiais['team_a'] == time_a_pt) & (df_oficiais['team_b'] == time_b_pt)) |
+            ((df_oficiais['team_a'] == time_b_pt) & (df_oficiais['team_b'] == time_a_pt))
+        ].tolist()
+        
+        if idx:
+            i = idx[0]
             
-            if idx:
-                i = idx[0]
+            # 1. Sincroniza o Horário Oficial de todos os jogos (Convertendo para Horário de Brasília)
+            horario_api = pd.to_datetime(data_api).tz_convert('America/Sao_Paulo').strftime('%H:%M')
+            if 'horario' not in df_oficiais.columns or df_oficiais.at[i, 'horario'] != horario_api:
+                df_oficiais.at[i, 'horario'] = horario_api
+                houve_mudanca = True
+
+            # 2. Sincroniza os Gols dos jogos em andamento ou finalizados
+            if status in ["1H", "2H", "HT", "ET", "P", "FT", "AET", "PEN"] and gols_a is not None and gols_b is not None:
                 if df_oficiais.at[i, 'team_a'] == time_a_pt:
                     gols_time_a = int(gols_a)
                     gols_time_b = int(gols_b)
@@ -156,9 +169,10 @@ if dados_json and dados_json.get("results", 0) > 0:
                 if pd.isna(real_a_banco) or pd.isna(real_b_banco) or int(real_a_banco) != gols_time_a or int(real_b_banco) != gols_time_b:
                     df_oficiais.at[i, 'real_a'] = gols_time_a
                     df_oficiais.at[i, 'real_b'] = gols_time_b
-                    houve_gol = True
+                    houve_mudanca = True
 
-if houve_gol:
+# Salva se houve gols novos ou alguma atualização de horário detectada pela API
+if houve_mudanca or precisa_atualizar:
     conn.update(worksheet="Resultados", data=df_oficiais)
     st.cache_data.clear()
 
@@ -291,10 +305,12 @@ with aba1:
             
             ra = jogo['real_a']
             rb = jogo['real_b']
+            horario_jogo = jogo.get('horario', 'A definir')
             jogo_iniciado = pd.notna(ra) and pd.notna(rb)
             placar_of = f"{int(ra)} x {int(rb)}" if jogo_iniciado else "Aguardando Início..."
             
-            st.markdown(f"**Grupo {jogo['grupo']}** &nbsp;|&nbsp; 📍 {jogo['local']} &nbsp;|&nbsp; **Placar Oficial:** `{placar_of}`")
+            # Adicionado o ícone e a variável de Horário
+            st.markdown(f"**Grupo {jogo['grupo']}** &nbsp;|&nbsp; 🕒 {horario_jogo} &nbsp;|&nbsp; 📍 {jogo['local']} &nbsp;|&nbsp; **Placar Oficial:** `{placar_of}`")
             
             if not df_analise.empty:
                 palpites_do_jogo = df_analise[df_analise['game_id'] == jogo['game_id']]
@@ -498,7 +514,7 @@ with aba4:
         st.info("O sistema já puxa os dados ao vivo da API. Mas se a API falhar ou você quiser CHUMBAR um resultado definitivo na planilha para testar, edite aqui e salve.")
         
         df_admin = conn.read(worksheet="Resultados", ttl=15)
-        df_atualizado = st.data_editor(df_admin, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B", min_value=0, step=1)}, hide_index=True, use_container_width=True)
+        df_atualizado = st.data_editor(df_admin, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "horario": st.column_config.TextColumn("Horário", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B", min_value=0, step=1)}, hide_index=True, use_container_width=True)
         
         if st.button("💾 Salvar Resultados na Planilha"):
             conn.update(worksheet="Resultados", data=df_atualizado)
@@ -584,7 +600,7 @@ with aba5:
                     nome_usuario = df_usuario.iloc[0]["nome"]
                     st.success(f"Palpites encontrados para {nome_usuario}")
 
-                    df_exibicao = pd.merge(df_usuario, df_oficiais[["game_id", "data", "grupo", "local", "team_a", "team_b"]], on="game_id", how="left")
+                    df_exibicao = pd.merge(df_usuario, df_oficiais[["game_id", "data", "horario", "grupo", "local", "team_a", "team_b"]], on="game_id", how="left")
                     grupos = sorted(df_exibicao["grupo"].dropna().unique())
 
                     for grupo in grupos:
@@ -595,7 +611,8 @@ with aba5:
                             with col_meus:
                                 st.markdown("<h6 style='text-align: center; color:#003882;'>O Que Eu Apostei</h6>", unsafe_allow_html=True)
                                 for _, jogo in jogos_grupo.iterrows():
-                                    st.markdown(f"**📅 {jogo['data']}**<br><b>{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}</b><br>📍 {jogo['local']}", unsafe_allow_html=True)
+                                    horario_formatado = jogo.get('horario', 'A definir')
+                                    st.markdown(f"**📅 {jogo['data']} às {horario_formatado}**<br><b>{jogo['team_a']} {int(jogo['pred_a'])} x {int(jogo['pred_b'])} {jogo['team_b']}</b><br>📍 {jogo['local']}", unsafe_allow_html=True)
                                     st.divider()
                                     
                             with col_reais:
@@ -610,8 +627,8 @@ with aba5:
 
                     st.divider()
                     st.subheader("📋 Resumo Completo")
-                    tabela = df_exibicao[["data", "grupo", "team_a", "pred_a", "pred_b", "team_b"]].copy()
-                    tabela.columns = ["Data", "Grupo", "Seleção A", "Gols A", "Gols B", "Seleção B"]
+                    tabela = df_exibicao[["data", "horario", "grupo", "team_a", "pred_a", "pred_b", "team_b"]].copy()
+                    tabela.columns = ["Data", "Horário", "Grupo", "Seleção A", "Gols A", "Gols B", "Seleção B"]
                     st.dataframe(tabela, use_container_width=True, hide_index=True)
                     st.download_button("📥 Baixar Meus Palpites", tabela.to_csv(index=False).encode("utf-8-sig"), file_name=f"palpites_{nome_usuario}.csv", mime="text/csv")
 
@@ -626,7 +643,7 @@ with aba6:
     else:
         st.subheader("1. Digite seus resultados hipotéticos")
         df_simulacao = df_oficiais.copy()
-        df_editado = st.data_editor(df_simulacao, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A (Simulação)", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B (Simulação)", min_value=0, step=1)}, hide_index=True, use_container_width=True, key="simulador_editor")
+        df_editado = st.data_editor(df_simulacao, column_config={"game_id": st.column_config.TextColumn("ID", disabled=True), "data": st.column_config.TextColumn("Data", disabled=True), "horario": st.column_config.TextColumn("Horário", disabled=True), "local": st.column_config.TextColumn("Sede", disabled=True), "grupo": st.column_config.TextColumn("Grupo", disabled=True), "team_a": st.column_config.TextColumn("Seleção A", disabled=True), "team_b": st.column_config.TextColumn("Seleção B", disabled=True), "real_a": st.column_config.NumberColumn("Gols A (Simulação)", min_value=0, step=1), "real_b": st.column_config.NumberColumn("Gols B (Simulação)", min_value=0, step=1)}, hide_index=True, use_container_width=True, key="simulador_editor")
 
         st.subheader("2. Veja como ficaria a tabela")
         if st.button("🚀 Calcular Ranking Simulado"):
